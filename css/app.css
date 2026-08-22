@@ -107,6 +107,16 @@
 }
 
 .toolbar-select-shell select { width: 100%; }
+.toolbar select option {
+  background: #ffffff;
+  color: #1c1d21;
+}
+
+.toolbar select option:checked {
+  background: #1769d2;
+  color: #ffffff;
+}
+
 .toolbar-pill-icon { color: #aaa89f; width: 16px !important; height: 16px !important; }
 
 .select-chevron {
