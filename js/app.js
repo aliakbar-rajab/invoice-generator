@@ -19,6 +19,8 @@
   var MM_TO_PX = 96 / 25.4;
   var LEGACY_STORAGE_KEY = "preinvoice.autosave.v1";
   var SAVED_LIST_KEY = "preinvoice.saved.v1";
+  var CUSTOM_PROFILES_KEY = "preinvoice.companyProfiles.v1";
+  var PROFILE_ASSETS_KEY = "preinvoice.profileAssets.v1";
 
   // In-memory id of the saved-list entry currently loaded (null = unsaved/
   // new document). Save updates this entry in place once set; it is reset
@@ -30,6 +32,7 @@
   var stampRequested = false;
   var stampAvailable = false;
   var lastProfileKey = null;
+  var pendingCompanyLogoData = "";
   var MIN_INVOICE_ROWS = 8;
 
   // True while meta.number still holds a live suggestion (set by blankInvoice
@@ -82,6 +85,7 @@
       website: "",
     },
   };
+  var BUILT_IN_PROFILE_ORDER = ["fouladBonyan", "karaBorjParseh"];
   var DEFAULT_PROFILE_KEY = "fouladBonyan";
 
   // ---------- Document fonts ----------
@@ -138,6 +142,11 @@
   var currentDocumentTitleEl = document.getElementById("current-document-title");
   var toolbarPayableEl = document.getElementById("toolbar-payable-total");
   var includeStampEl = document.getElementById("include-stamp");
+  var headerGrayToggleEl = document.getElementById("header-gray-toggle");
+  var stampUploadFileEl = document.getElementById("stamp-upload-file");
+  var stampUploadPreviewEl = document.getElementById("settings-stamp-preview");
+  var stampUploadEmptyEl = document.getElementById("settings-stamp-empty");
+  var stampUploadStatusEl = document.getElementById("stamp-upload-status");
   var settingsPanelEl = document.getElementById("settings-panel");
   var settingsBtnEl = document.getElementById("btn-settings");
   var validationEl = document.getElementById("invoice-validation");
@@ -150,19 +159,36 @@
   var dialogInputWrapEl = document.getElementById("app-dialog-input-wrap");
   var dialogInputEl = document.getElementById("app-dialog-input");
   var dialogActionsEl = document.getElementById("app-dialog-actions");
+  var companyEditorDialogEl = document.getElementById("company-editor-dialog");
+  var companyEditorFormEl = document.getElementById("company-editor-form");
+  var companyEditorNameEl = document.getElementById("company-editor-name");
+  var companyEditorNationalIdEl = document.getElementById("company-editor-national-id");
+  var companyEditorPostalCodeEl = document.getElementById("company-editor-postal-code");
+  var companyEditorAddressEl = document.getElementById("company-editor-address");
+  var companyEditorPhonesEl = document.getElementById("company-editor-phones");
+  var companyEditorWebsiteEl = document.getElementById("company-editor-website");
+  var companyLogoFileEl = document.getElementById("company-logo-file");
+  var companyLogoPreviewEl = document.getElementById("company-logo-preview");
+  var companyLogoEmptyEl = document.getElementById("company-logo-empty");
+  var companyLogoStatusEl = document.getElementById("company-logo-status");
+  var companyEditorErrorEl = document.getElementById("company-editor-error");
 
   // A failed image load (e.g. a profile added without its stamp file yet)
   // hides the <img> so the empty dashed placeholder box shows instead of a
   // broken-image icon.
   stampEl.addEventListener("error", function () {
     stampAvailable = false;
+    stampRequested = false;
     stampEl.hidden = true;
     stampAreaEl.classList.remove("has-stamp");
     sheet.classList.remove("stamp-enabled");
+    syncStampVisibility();
+    refreshStampUploadPreview();
   });
   stampEl.addEventListener("load", function () {
     stampAvailable = true;
     syncStampVisibility();
+    refreshStampUploadPreview();
   });
 
   // Same missing-file safety net as the stamp above: a profile added (or
@@ -171,6 +197,15 @@
   logoEl.addEventListener("error", function () {
     logoEl.hidden = true;
     logoChipEl.hidden = true;
+  });
+  stampUploadPreviewEl.addEventListener("error", function () {
+    this.hidden = true;
+    stampUploadEmptyEl.hidden = false;
+  });
+  companyLogoPreviewEl.addEventListener("error", function () {
+    this.hidden = true;
+    companyLogoEmptyEl.hidden = false;
+    companyLogoStatusEl.textContent = "نمایش این تصویر ممکن نشد.";
   });
 
   // ---------- Application dialog ----------
@@ -249,6 +284,99 @@
   }
 
   // ---------- Defaults ----------
+
+  function readStoredObject(key) {
+    try {
+      var raw = localStorage.getItem(key);
+      var parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch (err) {
+      return {};
+    }
+  }
+
+  function profileFromCompanyData(company, userCreated) {
+    company = company || {};
+    var name = String(company.name || company.label || "").trim();
+    return {
+      label: name,
+      logo: String(company.logo || ""),
+      stamp: String(company.stamp || ""),
+      name: name,
+      nationalId: String(company.nationalId || ""),
+      address: String(company.address || ""),
+      postalCode: String(company.postalCode || ""),
+      phones: String(company.phones || company.phone || ""),
+      website: String(company.website || ""),
+      userCreated: !!userCreated,
+    };
+  }
+
+  function persistUserProfiles() {
+    var stored = {};
+    Object.keys(COMPANY_PROFILES).forEach(function (key) {
+      if (COMPANY_PROFILES[key] && COMPANY_PROFILES[key].userCreated) stored[key] = COMPANY_PROFILES[key];
+    });
+    localStorage.setItem(CUSTOM_PROFILES_KEY, JSON.stringify(stored));
+  }
+
+  function persistProfileAsset(profileKey, assetName, dataUrl) {
+    var overrides = readStoredObject(PROFILE_ASSETS_KEY);
+    if (!overrides[profileKey]) overrides[profileKey] = {};
+    overrides[profileKey][assetName] = dataUrl;
+    localStorage.setItem(PROFILE_ASSETS_KEY, JSON.stringify(overrides));
+  }
+
+  function renderCompanyProfileOptions(selectedKey) {
+    var userKeys = Object.keys(COMPANY_PROFILES)
+      .filter(function (key) { return COMPANY_PROFILES[key] && COMPANY_PROFILES[key].userCreated; })
+      .sort(function (a, b) {
+        return COMPANY_PROFILES[a].label.localeCompare(COMPANY_PROFILES[b].label, "fa");
+      });
+    var keys = BUILT_IN_PROFILE_ORDER.concat(userKeys, [CUSTOM_PROFILE_KEY]);
+    profileSelectEl.innerHTML = "";
+    keys.forEach(function (key) {
+      var profile = COMPANY_PROFILES[key];
+      if (!profile) return;
+      var option = document.createElement("option");
+      option.value = key;
+      option.textContent = profile.label || profile.name || "بدون نام";
+      profileSelectEl.appendChild(option);
+    });
+    profileSelectEl.value = COMPANY_PROFILES[selectedKey] ? selectedKey : DEFAULT_PROFILE_KEY;
+  }
+
+  function hydrateCompanyProfiles() {
+    var storedProfiles = readStoredObject(CUSTOM_PROFILES_KEY);
+    Object.keys(storedProfiles).forEach(function (key) {
+      if (!/^company-[a-z0-9-]+$/i.test(key)) return;
+      var profile = profileFromCompanyData(storedProfiles[key], true);
+      if (profile.name) COMPANY_PROFILES[key] = profile;
+    });
+
+    var assetOverrides = readStoredObject(PROFILE_ASSETS_KEY);
+    Object.keys(assetOverrides).forEach(function (key) {
+      if (!COMPANY_PROFILES[key] || !assetOverrides[key]) return;
+      if (assetOverrides[key].logo) COMPANY_PROFILES[key].logo = String(assetOverrides[key].logo);
+      if (assetOverrides[key].stamp) COMPANY_PROFILES[key].stamp = String(assetOverrides[key].stamp);
+    });
+    renderCompanyProfileOptions(DEFAULT_PROFILE_KEY);
+  }
+
+  function registerEmbeddedProfile(profileKey, company) {
+    if (!profileKey || COMPANY_PROFILES[profileKey] || profileKey === CUSTOM_PROFILE_KEY) return profileKey;
+    if (!/^company-[a-z0-9-]+$/i.test(profileKey)) return DEFAULT_PROFILE_KEY;
+    var profile = profileFromCompanyData(company, true);
+    if (!profile.name) return DEFAULT_PROFILE_KEY;
+    COMPANY_PROFILES[profileKey] = profile;
+    try {
+      persistUserProfiles();
+    } catch (err) {
+      // The opened invoice remains usable even when browser storage is full.
+    }
+    renderCompanyProfileOptions(profileKey);
+    return profileKey;
+  }
 
   function resolveProfile(key) {
     return COMPANY_PROFILES[key] || COMPANY_PROFILES[DEFAULT_PROFILE_KEY];
@@ -336,6 +464,7 @@
       name: profile.name,
       nationalId: profile.nationalId,
       address: profile.address,
+      postalCode: profile.postalCode,
       phones: profile.phones,
       website: profile.website,
     };
@@ -359,7 +488,6 @@
       website.readOnly = false;
       website.classList.remove("inv-readonly");
     }
-    if (includeStampEl) includeStampEl.disabled = custom;
   }
 
   var SEQ_KEY_PREFIX = "pishFaktor.dailySeq.";
@@ -409,8 +537,9 @@
     var profileKey = DEFAULT_PROFILE_KEY;
     var profile = resolveProfile(profileKey);
     return {
-      version: 4,
+      version: 5,
       orientation: "landscape",
+      headerGray: true,
       font: DEFAULT_FONT_KEY,
       fontScale: DEFAULT_FONT_SCALE,
       meta: {
@@ -468,6 +597,7 @@
     setStampSrc(profile.stamp);
     profileSelectEl.value = key;
     lastProfileKey = key;
+    refreshStampUploadPreview();
     // Values were set programmatically (no input events), so re-fit the
     // static fields and refresh the footer's empty-item state directly.
     fitStaticFields();
@@ -502,7 +632,10 @@
     stampEl.hidden = !shouldShow;
     stampAreaEl.classList.toggle("has-stamp", shouldShow);
     sheet.classList.toggle("stamp-enabled", shouldShow);
-    if (includeStampEl) includeStampEl.checked = !!stampRequested;
+    if (includeStampEl) {
+      includeStampEl.checked = !!stampRequested;
+      includeStampEl.disabled = !stampAvailable;
+    }
   }
 
   function invalidateFinalization() {
@@ -519,6 +652,8 @@
       stampEl.removeAttribute("src");
       stampAreaEl.classList.remove("has-stamp");
       sheet.classList.remove("stamp-enabled");
+      refreshStampUploadPreview();
+      syncStampVisibility();
       return;
     }
     stampEl.setAttribute("src", src);
@@ -528,6 +663,165 @@
     } else {
       stampEl.hidden = true;
     }
+    refreshStampUploadPreview();
+  }
+
+  function refreshStampUploadPreview() {
+    if (!stampUploadPreviewEl || !stampUploadEmptyEl || !stampUploadStatusEl) return;
+    var profile = resolveProfile(profileSelectEl.value);
+    var src = stampEl.getAttribute("src") || profile.stamp || "";
+    if (src) {
+      stampUploadPreviewEl.src = src;
+      stampUploadPreviewEl.hidden = false;
+      stampUploadEmptyEl.hidden = true;
+      stampUploadStatusEl.textContent = "مهر برای «" + (profile.label || profile.name) + "» آماده است.";
+    } else {
+      stampUploadPreviewEl.hidden = true;
+      stampUploadPreviewEl.removeAttribute("src");
+      stampUploadEmptyEl.hidden = false;
+      stampUploadStatusEl.textContent = "برای شرکت انتخاب‌شده مهری ثبت نشده است.";
+    }
+  }
+
+  function applyHeaderGray(enabled) {
+    var active = enabled !== false;
+    sheet.classList.toggle("header-gray", active);
+    if (headerGrayToggleEl) headerGrayToggleEl.checked = active;
+  }
+
+  function setCompanyLogoPreview(src, label) {
+    pendingCompanyLogoData = src || "";
+    if (pendingCompanyLogoData) {
+      companyLogoPreviewEl.src = pendingCompanyLogoData;
+      companyLogoPreviewEl.hidden = false;
+      companyLogoEmptyEl.hidden = true;
+      companyLogoStatusEl.textContent = label || "لوگو آمادهٔ ثبت است.";
+    } else {
+      companyLogoPreviewEl.hidden = true;
+      companyLogoPreviewEl.removeAttribute("src");
+      companyLogoEmptyEl.hidden = false;
+      companyLogoStatusEl.textContent = "PNG، JPG، WebP یا SVG";
+    }
+  }
+
+  function resizeImageFile(file, maxDimension) {
+    return new Promise(function (resolve, reject) {
+      if (!file || !/^image\//i.test(file.type || "")) {
+        reject(new Error("فایل انتخاب‌شده تصویر معتبر نیست."));
+        return;
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        reject(new Error("حجم تصویر باید کمتر از ۱۰ مگابایت باشد."));
+        return;
+      }
+
+      var reader = new FileReader();
+      reader.onerror = function () { reject(new Error("خواندن تصویر ممکن نشد.")); };
+      reader.onload = function () {
+        var img = new Image();
+        img.onerror = function () { reject(new Error("ساختار تصویر قابل استفاده نیست.")); };
+        img.onload = function () {
+          try {
+            var width = img.naturalWidth || img.width;
+            var height = img.naturalHeight || img.height;
+            if (!width || !height) {
+              reject(new Error("ابعاد تصویر قابل تشخیص نیست."));
+              return;
+            }
+            var scale = Math.min(1, maxDimension / Math.max(width, height));
+            var canvas = document.createElement("canvas");
+            canvas.width = Math.max(1, Math.round(width * scale));
+            canvas.height = Math.max(1, Math.round(height * scale));
+            var context = canvas.getContext("2d");
+            if (!context) throw new Error("پردازش تصویر در این مرورگر پشتیبانی نمی‌شود.");
+            context.imageSmoothingEnabled = true;
+            context.imageSmoothingQuality = "high";
+            context.drawImage(img, 0, 0, canvas.width, canvas.height);
+            var dataUrl = canvas.toDataURL("image/webp", 0.9);
+            if (!dataUrl || dataUrl.length > 3.5 * 1024 * 1024) {
+              reject(new Error("تصویر پس از بهینه‌سازی هنوز بیش از حد بزرگ است."));
+              return;
+            }
+            resolve(dataUrl);
+          } catch (err) {
+            reject(new Error(err && err.message ? err.message : "پردازش تصویر ممکن نشد."));
+          }
+        };
+        img.src = String(reader.result || "");
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function closeCompanyEditor() {
+    companyEditorDialogEl.hidden = true;
+    companyEditorErrorEl.hidden = true;
+    companyLogoFileEl.value = "";
+  }
+
+  function openCompanyEditor() {
+    var adHoc = isCustomProfile(profileSelectEl.value);
+    companyEditorFormEl.reset();
+    companyEditorErrorEl.hidden = true;
+    if (adHoc) {
+      companyEditorNameEl.value = customCompanyNameEl.value.trim();
+      companyEditorNationalIdEl.value = document.querySelector('[data-field="seller.nationalId"]').value;
+      companyEditorPostalCodeEl.value = document.querySelector('[data-field="seller.postalCode"]').value;
+      companyEditorAddressEl.value = document.querySelector('[data-field="seller.address"]').value;
+      companyEditorPhonesEl.value = document.querySelector('[data-field="seller.phone"]').value;
+      companyEditorWebsiteEl.value = document.querySelector('[data-field="company.website"]').value;
+      setCompanyLogoPreview(resolveProfile(CUSTOM_PROFILE_KEY).logo, "لوگوی فعلی شرکت سایر");
+    } else {
+      setCompanyLogoPreview("", "");
+    }
+    closeSettingsPanel();
+    companyEditorDialogEl.hidden = false;
+    window.setTimeout(function () { companyEditorNameEl.focus(); }, 0);
+  }
+
+  function createCompanyProfileFromEditor() {
+    var name = companyEditorNameEl.value.trim();
+    if (!name) {
+      companyEditorErrorEl.textContent = "نام شرکت را وارد کنید.";
+      companyEditorErrorEl.hidden = false;
+      companyEditorNameEl.focus();
+      return false;
+    }
+
+    var profileKey = "company-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6);
+    var profile = profileFromCompanyData({
+      name: name,
+      logo: pendingCompanyLogoData,
+      stamp: "",
+      nationalId: toPersianDigits(companyEditorNationalIdEl.value.trim()),
+      address: companyEditorAddressEl.value.trim(),
+      postalCode: toPersianDigits(companyEditorPostalCodeEl.value.trim()),
+      phones: toPersianDigits(companyEditorPhonesEl.value.trim()),
+      website: companyEditorWebsiteEl.value.trim(),
+    }, true);
+
+    COMPANY_PROFILES[profileKey] = profile;
+    try {
+      persistUserProfiles();
+    } catch (err) {
+      delete COMPANY_PROFILES[profileKey];
+      companyEditorErrorEl.textContent = "فضای ذخیرهٔ مرورگر کافی نیست؛ تصویر کوچک‌تری انتخاب کنید.";
+      companyEditorErrorEl.hidden = false;
+      return false;
+    }
+
+    renderCompanyProfileOptions(profileKey);
+    applyCompanyProfile(profileKey);
+    stampRequested = false;
+    syncStampVisibility();
+    if (numberIsAutoSuggested) {
+      var numberInput = document.querySelector('[data-field="meta.number"]');
+      if (numberInput) numberInput.value = suggestInvoiceNumber(profileKey);
+    }
+    isDirty = true;
+    setStatus("شرکت «" + profile.label + "» ثبت و انتخاب شد.");
+    closeCompanyEditor();
+    return true;
   }
 
   function makeBlankRows(n) {
@@ -729,8 +1023,9 @@
   // calls refreshEmptyStates on its own, so callers that only need the
   // metrics pass (like applyCompanyProfile) can still call this directly.
   function fitStaticFields() {
-    // Prose wraps; it is never reduced to unreadable microtype. Only compact
-    // financial figures use fitNumericEl, with a conservative 82% floor.
+    // Long-form editable prose wraps; it is never reduced to unreadable
+    // microtype. Only compact financial figures use fitNumericEl, with a
+    // conservative 82% floor.
     autoGrowTextareas();
     refreshEmptyStates();
   }
@@ -1103,8 +1398,8 @@
     if (!el) return;
     el.textContent = text;
     if (key === "netTotal" && toolbarPayableEl) toolbarPayableEl.textContent = text || "—";
-    // The amount-in-words line is ordinary prose (wraps at spaces like any
-    // text), not a single-line figure — it never needs shrinking.
+    // Amount in words has its own compact single-line print treatment in CSS;
+    // the numeric fitter assumes tabular figures and must not be applied here.
     if (key !== "netTotalWords") fitNumericEl(el);
   }
 
@@ -1192,8 +1487,9 @@
 
   function collectInvoiceData() {
     var data = {
-      version: 4,
+      version: 5,
       orientation: currentOrientation(),
+      headerGray: sheet.classList.contains("header-gray"),
       font: DEFAULT_FONT_KEY,
       fontScale: DEFAULT_FONT_SCALE,
       meta: {},
@@ -1223,7 +1519,6 @@
       data.company.address = data.seller.address || "";
       data.company.phones = data.seller.phone || "";
       data.company.website = enteredWebsite;
-      data.includeStamp = false;
     } else {
       data.company = companyFromProfile(profileKey, profile);
       data.company.website = enteredWebsite;
@@ -1247,8 +1542,23 @@
 
   function applyInvoiceData(raw) {
     var profileKey = (raw && raw.company && raw.company.profile) || DEFAULT_PROFILE_KEY;
+    if (!COMPANY_PROFILES[profileKey]) profileKey = registerEmbeddedProfile(profileKey, raw && raw.company);
     if (!COMPANY_PROFILES[profileKey]) profileKey = DEFAULT_PROFILE_KEY;
     var profile = resolveProfile(profileKey);
+    if (!isCustomProfile(profileKey) && raw && raw.company) {
+      ["logo", "stamp"].forEach(function (assetName) {
+        var embedded = String(raw.company[assetName] || "");
+        var current = String(profile[assetName] || "");
+        if (!/^data:image\//i.test(embedded) || /^data:image\//i.test(current)) return;
+        profile[assetName] = embedded;
+        try {
+          if (profile.userCreated) persistUserProfiles();
+          else persistProfileAsset(profileKey, assetName, embedded);
+        } catch (err) {
+          // The document still uses the embedded image for this session.
+        }
+      });
+    }
     var defaults = blankInvoice();
     // Field-by-field fallback must come from the RESOLVED profile (the one
     // this file was actually saved under), not always the hardcoded default
@@ -1259,7 +1569,7 @@
     var customProfile = isCustomProfile(profileKey);
     var customSellerDefaults = { name: "", nationalId: "", address: "", postalCode: "", phone: "" };
     var companyData = customProfile
-      ? Object.assign({}, profileDefaults, raw && raw.company, { profile: CUSTOM_PROFILE_KEY, logo: "", stamp: "" })
+      ? Object.assign({}, profileDefaults, raw && raw.company, { profile: CUSTOM_PROFILE_KEY })
       : Object.assign({}, profileDefaults, {
           website: raw && raw.company && raw.company.website != null
             ? raw.company.website
@@ -1274,6 +1584,7 @@
     }
     var data = {
       orientation: (raw && raw.orientation) || defaults.orientation,
+      headerGray: raw && raw.headerGray != null ? !!raw.headerGray : defaults.headerGray,
       font: DEFAULT_FONT_KEY,
       fontScale: DEFAULT_FONT_SCALE,
       meta: Object.assign({}, defaults.meta, raw && raw.meta),
@@ -1282,7 +1593,7 @@
       company: companyData,
       taxPercent: raw && raw.taxPercent != null ? raw.taxPercent : defaults.taxPercent,
       notes: raw && raw.notes != null ? raw.notes : defaults.notes,
-      includeStamp: !customProfile && !!(raw && raw.includeStamp),
+      includeStamp: !!(raw && raw.includeStamp),
       items: raw && raw.items && raw.items.length ? raw.items.filter(function (row) {
         return ROW_FIELDS.some(function (field) { return row && String(row[field] || "").trim(); });
       }) : defaults.items,
@@ -1308,9 +1619,14 @@
 
     document.getElementById("inv-company-name").textContent = data.company.name || "";
     setCustomCompanyMode(profileKey, data.company.name);
-    setCompanyBranding(profileKey, profile);
+    if (customProfile) {
+      COMPANY_PROFILES[CUSTOM_PROFILE_KEY].logo = data.company.logo || "";
+      COMPANY_PROFILES[CUSTOM_PROFILE_KEY].stamp = data.company.stamp || "";
+    }
+    setCompanyBranding(profileKey, customProfile ? data.company : profile);
+    applyHeaderGray(data.headerGray);
     stampRequested = data.includeStamp;
-    setStampSrc(profile.stamp);
+    setStampSrc(customProfile ? data.company.stamp : profile.stamp);
     profileSelectEl.value = profileKey;
     lastProfileKey = profileKey;
     syncStampVisibility();
@@ -2101,6 +2417,73 @@
     });
     settingsPanelEl.addEventListener("click", function (e) { e.stopPropagation(); });
 
+    headerGrayToggleEl.addEventListener("change", function () {
+      applyHeaderGray(this.checked);
+      invalidateFinalization();
+      isDirty = true;
+      setStatus(this.checked ? "پس‌زمینهٔ خاکستری هدر فعال شد." : "پس‌زمینهٔ هدر خاموش شد.");
+    });
+
+    document.getElementById("btn-company-editor").addEventListener("click", openCompanyEditor);
+    document.getElementById("btn-company-editor-cancel").addEventListener("click", closeCompanyEditor);
+    companyEditorDialogEl.addEventListener("click", function (e) {
+      if (e.target === companyEditorDialogEl) closeCompanyEditor();
+    });
+    companyEditorFormEl.addEventListener("submit", function (e) {
+      e.preventDefault();
+      createCompanyProfileFromEditor();
+    });
+    document.getElementById("btn-company-logo").addEventListener("click", function () {
+      companyLogoFileEl.click();
+    });
+    companyLogoFileEl.addEventListener("change", async function () {
+      var file = this.files && this.files[0];
+      this.value = "";
+      if (!file) return;
+      companyEditorErrorEl.hidden = true;
+      companyLogoStatusEl.textContent = "در حال آماده‌سازی لوگو…";
+      try {
+        var dataUrl = await resizeImageFile(file, 720);
+        setCompanyLogoPreview(dataUrl, file.name + " · بهینه‌شده برای چاپ");
+      } catch (err) {
+        companyEditorErrorEl.textContent = err.message || "افزودن لوگو ممکن نشد.";
+        companyEditorErrorEl.hidden = false;
+        setCompanyLogoPreview("", "");
+      }
+    });
+
+    document.getElementById("btn-stamp-upload").addEventListener("click", function () {
+      stampUploadFileEl.click();
+    });
+    stampUploadFileEl.addEventListener("change", async function () {
+      var file = this.files && this.files[0];
+      this.value = "";
+      if (!file) return;
+      var profileKey = profileSelectEl.value;
+      var profile = resolveProfile(profileKey);
+      var previousStamp = profile.stamp || "";
+      stampUploadStatusEl.textContent = "در حال آماده‌سازی مهر…";
+      try {
+        var dataUrl = await resizeImageFile(file, 900);
+        profile.stamp = dataUrl;
+        if (profile.userCreated) persistUserProfiles();
+        else persistProfileAsset(profileKey, "stamp", dataUrl);
+        stampRequested = false;
+        setStampSrc(dataUrl);
+        syncStampVisibility();
+        isDirty = true;
+        setStatus("مهر جدید برای «" + (profile.label || profile.name) + "» ثبت شد.");
+      } catch (err) {
+        profile.stamp = previousStamp;
+        setStampSrc(previousStamp);
+        await showAppDialog({
+          title: "افزودن مهر ناموفق بود",
+          message: err.message || "تصویر مهر قابل استفاده نیست.",
+          actions: [{ id: "ok", label: "متوجه شدم", primary: true }],
+        });
+      }
+    });
+
     includeStampEl.addEventListener("change", async function () {
       if (!this.checked) {
         stampRequested = false;
@@ -2204,6 +2587,7 @@
         }
       } else if (e.key === "Escape") {
         if (!appDialogEl.hidden) closeAppDialog({ action: "cancel", value: "" });
+        if (!companyEditorDialogEl.hidden) closeCompanyEditor();
         closeSavedPanel();
         closeSettingsPanel();
       }
@@ -2220,6 +2604,7 @@
     });
 
     migrateLegacyAutosave();
+    hydrateCompanyProfiles();
     // Every load starts a clean blank invoice — nothing is auto-restored.
     // Previously-saved invoices stay reachable from the "ذخیره‌شده‌ها" panel
     // (see openSavedEntry above), they just aren't loaded automatically.

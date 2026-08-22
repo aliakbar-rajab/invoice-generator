@@ -335,6 +335,10 @@ body {
   break-inside: avoid;
 }
 
+.invoice-sheet.header-gray .inv-head {
+  background: #f2f2f2;
+}
+
 /* The band used to be a dark fill with a rule under it to separate the two.
    It is a bordered white box now, so that rule would just be a second line
    parallel to the border. */
@@ -736,18 +740,19 @@ body {
 /* ---------- Amount in words ---------- */
 
 .inv-amount-words {
-  display: flex;
-  align-items: baseline;
-  gap: 2.5mm;
-  margin-block: 1.2mm;
-  padding: 0.9mm 3mm;
+  display: block;
+  min-height: 7mm;
+  margin: 0;
+  padding: 0.55mm 2.5mm;
   border: 1px solid var(--ink);
-  border-radius: 2mm;
+  border-radius: 1.5mm;
+  font-size: 0.9em;
+  line-height: 1.3;
+  white-space: nowrap;
   break-inside: avoid;
 }
 
 .inv-amount-words-label {
-  flex: none;
   font-weight: 800;
   font-size: 0.97em;
 }
@@ -759,9 +764,11 @@ body {
 }
 
 .inv-amount-words-value {
-  flex: 1 1 auto;
-  min-width: 0;
   color: var(--muted-strong);
+}
+
+.orientation-portrait .inv-amount-words {
+  font-size: 0.84em;
 }
 
 /* ---------- Summary ---------- */
@@ -780,7 +787,7 @@ body {
    an RTL document expects it. Boxes stretch to the totals box's height, so
    the stamp gets a tall zone without a separate signature band below. */
 /*
- * Four cells: totals, notes, buyer stamp, seller stamp.
+ * Five cells: totals, amount in words, notes, buyer stamp, seller stamp.
  *
  * The stamp boxes are sized to the stamp (--sig-w/--sig-h below) instead of
  * splitting the leftover width in half, which used to leave ~45mm of blank
@@ -788,9 +795,12 @@ body {
  * frees up — it used to be a full-width one-line strip above this row, so
  * moving it in here fills the gap AND buys back its old vertical band.
  *
- * Landscape has room for all four side by side. Portrait does not (it would
- * squeeze notes to ~26mm), so there notes takes its own full-width row and
- * the totals box spans the slack underneath it.
+ * Amount in words occupies its own shallow row directly below the totals
+ * box. It uses the identical grid columns, so the two boxes always have the
+ * same width while remaining visually separate. Landscape has room for the
+ * other three blocks alongside this financial stack. Portrait does not (it
+ * would squeeze notes to ~26mm), so there notes takes its own full-width row
+ * and the financial boxes span the slack underneath it.
  */
 .inv-summary {
   display: grid;
@@ -803,17 +813,23 @@ body {
 
 .orientation-landscape .inv-summary {
   grid-template-columns: var(--totals-span) 1fr var(--sig-w) var(--sig-w);
-  grid-template-areas: "totals notes buyer seller";
+  grid-template-areas:
+    "totals notes buyer seller"
+    "words  notes buyer seller";
+  grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .orientation-portrait .inv-summary {
   grid-template-columns: var(--totals-span) 1fr var(--sig-w) var(--sig-w);
   grid-template-areas:
     "notes  notes  notes  notes"
-    "totals totals buyer  seller";
+    "totals totals buyer  seller"
+    "words  words  buyer  seller";
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .inv-totals { grid-area: totals; }
+.inv-amount-words { grid-area: words; direction: rtl; }
 .inv-notes { grid-area: notes; }
 .inv-signature-buyer { grid-area: buyer; }
 .inv-signature-seller { grid-area: seller; }
@@ -1040,6 +1056,7 @@ body {
   flex: 1 1 auto;
   min-height: 0;
   position: relative;
+  overflow: hidden;
 }
 
 /* Absolutely positioned so the image's large intrinsic size can never

@@ -95,6 +95,23 @@
               </label>
             </div>
           </div>
+          <label class="settings-toggle-control">
+            <input type="checkbox" id="header-gray-toggle" checked />
+            <span><strong>پس‌زمینهٔ خاکستری هدر</strong><small>خاکستری بسیار روشن؛ در پیش‌نمایش و چاپ قابل خاموش‌کردن است.</small></span>
+          </label>
+          <div class="settings-section settings-company-tools">
+            <span class="settings-section-copy"><strong>شرکت‌های صادرکننده</strong><small>مشخصات و لوگوی شرکت جدید را ثبت و به فهرست بالا اضافه کنید.</small></span>
+            <button type="button" id="btn-company-editor" class="settings-action">ثبت شرکت جدید</button>
+          </div>
+          <div class="settings-section settings-stamp-tools">
+            <span class="settings-section-copy"><strong>مهر فروشنده</strong><small id="stamp-upload-status">مهر پروفایل فعلی</small></span>
+            <span class="settings-stamp-preview" aria-hidden="true">
+              <img id="settings-stamp-preview" alt="" hidden />
+              <span id="settings-stamp-empty">بدون مهر</span>
+            </span>
+            <button type="button" id="btn-stamp-upload" class="settings-action">افزودن / تغییر مهر</button>
+            <input type="file" id="stamp-upload-file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden />
+          </div>
           <div class="settings-section settings-template-info">
             <strong>قالب سازمانی</strong>
             <span>وزیرمتن · اندازهٔ ثابت و استاندارد چاپ</span>
@@ -263,11 +280,6 @@
         <span>برای رفتن به همین ستون در ردیف بعد، Enter بزنید.</span>
       </div>
 
-      <section class="inv-amount-words">
-        <span class="inv-amount-words-label">مبلغ به حروف</span>
-        <span class="inv-amount-words-value" data-total="netTotalWords">صفر ریال</span>
-      </section>
-
       <section class="inv-summary">
         <div class="inv-totals">
           <div>
@@ -294,6 +306,10 @@
             <strong data-total="netTotal">۰ ریال</strong>
           </div>
         </div>
+        <section class="inv-amount-words">
+          <span class="inv-amount-words-label">مبلغ به حروف</span>
+          <span class="inv-amount-words-value" data-total="netTotalWords">صفر ریال</span>
+        </section>
         <div class="inv-notes">
           <span class="inv-notes-label">توضیحات</span>
           <textarea class="inv-input inv-textarea" dir="rtl" data-field="notes" rows="1" placeholder=""></textarea>
@@ -340,6 +356,55 @@
       <input type="text" id="app-dialog-input" autocomplete="off" />
     </label>
     <div class="app-dialog-actions" id="app-dialog-actions"></div>
+  </section>
+</div>
+
+<div class="app-dialog-backdrop no-print" id="company-editor-dialog" hidden>
+  <section class="app-dialog company-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="company-editor-title" aria-describedby="company-editor-description">
+    <form id="company-editor-form">
+      <h2 id="company-editor-title">ثبت شرکت جدید</h2>
+      <p id="company-editor-description">اطلاعات این شرکت روی همین مرورگر ذخیره و به فهرست «شرکت صادرکننده» اضافه می‌شود.</p>
+      <div class="company-editor-grid">
+        <label class="company-editor-field company-editor-field-wide">
+          <span>نام شرکت <b aria-hidden="true">*</b></span>
+          <input type="text" id="company-editor-name" required autocomplete="organization" />
+        </label>
+        <label class="company-editor-field">
+          <span>شناسه ملی</span>
+          <input type="text" id="company-editor-national-id" inputmode="numeric" />
+        </label>
+        <label class="company-editor-field">
+          <span>کد پستی</span>
+          <input type="text" id="company-editor-postal-code" inputmode="numeric" />
+        </label>
+        <label class="company-editor-field company-editor-field-wide">
+          <span>نشانی</span>
+          <textarea id="company-editor-address" rows="2"></textarea>
+        </label>
+        <label class="company-editor-field company-editor-field-wide">
+          <span>تلفن</span>
+          <input type="text" id="company-editor-phones" />
+        </label>
+        <label class="company-editor-field company-editor-field-wide">
+          <span>وب‌سایت</span>
+          <input type="text" id="company-editor-website" dir="ltr" />
+        </label>
+      </div>
+      <div class="company-logo-control">
+        <span class="company-logo-preview">
+          <img id="company-logo-preview" alt="پیش‌نمایش لوگوی شرکت" hidden />
+          <span id="company-logo-empty">بدون لوگو</span>
+        </span>
+        <span class="company-logo-copy"><strong>لوگوی شرکت</strong><small id="company-logo-status">PNG، JPG، WebP یا SVG</small></span>
+        <button type="button" id="btn-company-logo" class="settings-action">انتخاب لوگو</button>
+        <input type="file" id="company-logo-file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden />
+      </div>
+      <p class="company-editor-error" id="company-editor-error" role="alert" hidden></p>
+      <div class="app-dialog-actions">
+        <button type="button" id="btn-company-editor-cancel">انصراف</button>
+        <button type="submit" class="primary">ثبت و انتخاب شرکت</button>
+      </div>
+    </form>
   </section>
 </div>
 

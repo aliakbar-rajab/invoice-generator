@@ -40,6 +40,8 @@ body,
   background: #fff;
 }
 
+.invoice-sheet.header-gray .inv-head { background: #f2f2f2; }
+
 .inv-card,
 .inv-table-frame,
 .inv-amount-words,
@@ -233,7 +235,7 @@ body,
 
 /* Keep the printed commercial blocks in the natural document flow. The
    editor may use the remaining sheet height as breathing room, but an auto
-   top margin here created a large, meaningless gap after amount-in-words. */
+   top margin here would create a large, meaningless gap after the table. */
 .print-page .inv-summary { margin-top: 2mm; }
 .print-page .inv-footer.is-empty { display: none; }
 
@@ -246,7 +248,7 @@ body,
 .print-page.layout-compact .inv-card-grid { padding-block: 0.8mm 1mm; gap-block: 0.35mm; }
 .print-page.layout-compact .inv-table th { padding-block: 0.85mm; }
 .print-page.layout-compact .inv-table td { padding-block: 0.42mm; line-height: 1.25; }
-.print-page.layout-compact .inv-amount-words { margin-block: 0.7mm; padding-block: 0.55mm; }
+.print-page.layout-compact .inv-amount-words { min-height: 6.5mm; padding-block: 0.4mm; }
 .print-page.layout-compact { --sig-h: 39mm; --sig-w: 42mm; }
 .print-page.layout-compact .inv-totals > div { min-height: 3.9mm; padding-block: 0.4mm; }
 .print-page.layout-compact .inv-totals .inv-total-final { min-height: 9mm; }
@@ -304,6 +306,7 @@ body,
   .inv-field-value.inv-input { border-bottom: 0 !important; }
   .inv-head,
   .inv-footer { background: #fff !important; }
+  .print-page.header-gray .inv-head { background: #f2f2f2 !important; }
   .invoice-validation,
   .inv-table-actions,
   .inv-stamp-draft-note { display: none !important; }
