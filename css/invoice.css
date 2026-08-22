@@ -1,0 +1,1291 @@
+/*
+ * Invoice sheet visual design — monochrome corporate document system.
+ *
+ * The only output that matters is the office's black-and-white laser, so the
+ * whole sheet is designed directly in grays: white, black, and a small set of
+ * gray steps. There is no hue anywhere, and no per-company color theme —
+ * screen is a literal preview of the printed page.
+ *
+ * Hierarchy comes from value, weight, rules and boxes. Two hard constraints
+ * that the printed sample taught us drive most of the choices below: large
+ * near-black areas streak on a laser, and gradients over a large area force
+ * the driver to halftone them. So bands are mid-gray and every fill is flat.
+ * See the palette block further down, and تست-چاپ.html for the diagnostic
+ * sheet that pins the exact gray steps.
+ */
+
+@font-face {
+  font-family: "Vazirmatn";
+  src: url("../fonts/vazirmatn-arabic-variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  /* `block` (not `swap`): briefly hide text rather than ever letting a
+     fallback system font render and then swap — a substitution that can get
+     caught mid-swap in a print/PDF snapshot taken right after page load. */
+  font-display: block;
+}
+
+/* Selectable document fonts (see the "فونت" toolbar picker in app.js).
+   Each is a static single-weight family, unlike Vazirmatn's variable file
+   above, so bold text (headings, totals) falls back to the browser's
+   synthetic bold when no dedicated bold file exists (B Nazanin only ships
+   one weight here). */
+@font-face {
+  font-family: "BNazanin";
+  src: url("../fonts/B-Nazanin.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "BMitra";
+  src: url("../fonts/B-Mitra.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "BMitra";
+  src: url("../fonts/B-Mitra-Bold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "Parastoo";
+  src: url("../fonts/Parastoo-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "Parastoo";
+  src: url("../fonts/Parastoo-Bold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+}
+
+:root {
+  /* Document font (invoice sheet only — the toolbar chrome always stays on
+     Vazirmatn, see .toolbar in app.css). Switched by setting data-font on
+     <html> from the toolbar's "فونت" picker. */
+  --doc-font: "Vazirmatn";
+
+  /* Document font-size multiplier (invoice sheet only). Set as an inline
+     custom property on <html> by the toolbar's "اندازه فونت" picker. Every
+     absolute pt size below is wrapped in calc(... * var(--doc-font-scale)). */
+  --doc-font-scale: 1;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html[data-font="nazanin"] {
+  --doc-font: "BNazanin";
+}
+
+html[data-font="mitra"] {
+  --doc-font: "BMitra";
+}
+
+html[data-font="vazirmatn"] {
+  --doc-font: "Vazirmatn";
+}
+
+html[data-font="parastoo"] {
+  --doc-font: "Parastoo";
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #e8e6e1;
+  font-family: var(--doc-font), Tahoma, Arial, sans-serif;
+  font-feature-settings: "ss01" 1, "tnum" 1;
+  font-variant-numeric: tabular-nums;
+  color: #1c1c1e;
+}
+
+.sheet-viewport {
+  display: flex;
+  justify-content: center;
+  padding: 28px 16px 60px;
+}
+
+/* ---------- Sheet base + per-company theme ---------- */
+
+/*
+ * MONOCHROME, AND ESSENTIALLY UNFILLED — line art, not filled bands.
+ *
+ * This document is only ever printed on the office's black-and-white laser,
+ * so nothing carries hue. But the printed test sheet (تست-چاپ.html) settled a
+ * second, harder question: a gray ladder from #131417 all the way up to
+ * #8f8f8f was printed, and *every single step streaked*. Horizontal toner
+ * banding on this printer is not a function of how dark the fill is — it is a
+ * function of there being a large filled area at all. No gray is safe, so
+ * lightening the bands further was never going to work.
+ *
+ * So the bands are gone. Every one of them — header, footer, card heads,
+ * table head, totals box — is now white paper inside a black rule, with black
+ * text. The rules and the type carry the structure, which is what a printed
+ * invoice form does anyway, and the page lays down a small fraction of the
+ * toner it used to.
+ *
+ * The two survivors are deliberate and small: the payable band's near-white
+ * fill (a ~60x10mm patch, chosen over the darker options in §3 of the test)
+ * and the table's alternating row tint (6mm strips, §4). Both were legible
+ * without banding in the print.
+ *
+ * The --band and --accent names are kept so the ~20 call sites elsewhere in
+ * this file need no edit; they simply resolve to paper-and-ink now.
+ */
+.invoice-sheet {
+  --paper: #ffffff;
+  --ink: #000000;
+  --muted: #5c5f61;
+  --muted-strong: #303335;
+  --line: #9aa0a3;          /* card borders, hairlines */
+  --line-soft: #b9bec1;     /* table row hairlines / column separators */
+  --surface: #e0e0e0;       /* zebra rows — تست-چاپ.html §4, option 4 */
+
+  /* "Bands" are white boxes now; the borders below do the work. */
+  --band-ink: var(--ink);
+  --band-muted: var(--muted);
+  --band-line: var(--line);
+  --band-grad: var(--paper);
+
+  /* Weight of the rule around the header, footer and totals box — the single
+     knob for how heavy the document reads. */
+  --edge: 0.6mm;
+
+  /*
+   * Interior of the header and footer boxes. Same tone as the table's
+   * alternating rows, which printed without banding — but those are 6mm
+   * strips and the header is a 277x27mm slab, so this is on trial: if the
+   * toner lines come back, they come back here first.
+   * ONE-LINE REVERT: set this to var(--paper).
+   */
+  --band-fill: #e0e0e0;
+
+  --accent-ink: #000000;
+  --accent-2: var(--muted);   /* was light-on-dark text; now gray-on-white */
+  --accent-soft: var(--line);
+
+  /* Small solid marks (card-head bullets, signature bullets) — tiny areas,
+     no banding risk, so they stay pure ink. */
+  --accent-grad: var(--ink);
+
+  /* The payable band's fill. Lightened from the test's option د on your note
+     that د was the most visible but wanted a lighter interior. */
+  --pay-fill: #ededed;
+
+  /* Shared with .inv-table's <col> widths below (same var, one source of
+     truth) so the totals/side seam in .inv-summary can be computed from the
+     real column geometry instead of an independently-guessed percentage. */
+  --col-del: 3%;
+
+  /*
+   * The screen-only delete column is display:none in print, at which point
+   * Chrome renormalizes the surviving columns' percentages over the 97% they
+   * share. The totals box is aligned to three of those columns, so its width
+   * has to be scaled by the same factor or it sits ~3mm short of the column
+   * rule it is supposed to meet. Overridden to 1/0.97 inside @media print.
+   */
+  --col-scale: 1;
+  --totals-span: calc(
+    (var(--col-net) + var(--col-discount) + var(--col-total)) * var(--col-scale)
+  );
+
+  /*
+   * Stamp boxes. The stamp itself is capped at 36mm (see .inv-signature-stamp
+   * — a real ink stamp is 3-4cm) and the assets are full-bleed squares, so
+   * 46mm square leaves a deliberate ~2.5mm margin on every side and nothing
+   * more. Raise BOTH these and the stamp's own cap together if the stamp is
+   * ever meant to print larger.
+   */
+  --sig-w: 46mm;
+  --sig-h: 46mm;
+
+  position: relative;
+  /* Column flex so the footer band can anchor to the sheet's bottom edge
+     (margin-top: auto below) instead of floating wherever content ends. */
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  color: var(--ink);
+  line-height: 1.5;
+  /* Subtle "paper on a desk" lift, not a floating SaaS card. */
+  box-shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 6px 18px rgb(0 0 0 / 10%);
+}
+
+/*
+ * کارا برج پارسه used to get its own charcoal+bronze theme here. Under a
+ * monochrome palette a second gray scheme would be indistinguishable from
+ * the first, so there is deliberately no per-company color override any
+ * more: the logo, the stamp and the company name carry the identity, and
+ * data-company is kept on the sheet purely as a hook for any future
+ * non-color difference.
+ */
+
+/* Force background colors (dark bands, accent fills, zebra rows) to print
+   regardless of the browser's own "background graphics" toggle. */
+.invoice-sheet,
+.invoice-sheet * {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.invoice-sheet h1,
+.invoice-sheet h2,
+.invoice-sheet p,
+.invoice-sheet span,
+.invoice-sheet dt,
+.invoice-sheet dd {
+  margin: 0;
+}
+
+/* Landscape (default): 297mm x 210mm */
+.invoice-sheet.orientation-landscape {
+  width: 297mm;
+  min-height: 210mm;
+  padding: 6mm 10mm 6mm;
+  font-size: calc(8.7pt * var(--doc-font-scale));
+
+  --col-row: 4%;
+  --col-desc: 33%;
+  --col-qty: 6%;
+  --col-unit: 5%;
+  --col-price: 13%;
+  --col-total: 13%;
+  --col-discount: 10%;
+  --col-net: 13%;
+}
+
+/* Portrait: 210mm x 297mm — proportions re-tuned, not a simple rotation */
+.invoice-sheet.orientation-portrait {
+  width: 210mm;
+  min-height: 297mm;
+  padding: 9mm 9mm 7mm;
+  font-size: calc(9.2pt * var(--doc-font-scale));
+
+  --col-row: 4.5%;
+  --col-desc: 32%;
+  --col-qty: 7%;
+  --col-unit: 6%;
+  --col-price: 13.5%;
+  --col-total: 13%;
+  --col-discount: 9.5%;
+  --col-net: 11%;
+}
+
+/* ---------- Watermark ---------- */
+
+/* Very faint company mark behind the content — brand presence on the empty
+   middle of the sheet without competing with the data. Everything else is
+   lifted above it via z-index below. */
+/*
+ * Kept in the markup but not rendered. At 5% opacity over a warm palette this
+ * was a faint tint; in grayscale on a mono laser it comes out as a gray smear
+ * lying across the table's rules, which reads as a printing fault rather than
+ * as branding — and it costs toner for the privilege. Set `display: block` to
+ * bring it back.
+ */
+.inv-watermark {
+  display: none;
+  position: absolute;
+  inset-inline-start: 4mm;
+  top: 44%;
+  width: 58mm;
+  max-height: 58mm;
+  object-fit: contain;
+  opacity: 0.05;
+  filter: grayscale(1);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.orientation-portrait .inv-watermark {
+  top: 40%;
+}
+
+.invoice-sheet > *:not(.inv-watermark) {
+  position: relative;
+  z-index: 1;
+}
+
+/* ---------- Header band ---------- */
+
+.inv-head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 4mm;
+  padding: 2.2mm 4.5mm;
+  background: var(--band-fill);
+  color: var(--band-ink);
+  border: var(--edge) solid var(--ink);
+  border-radius: 2.5mm;
+  break-inside: avoid;
+}
+
+/* The band used to be a dark fill with a rule under it to separate the two.
+   It is a bordered white box now, so that rule would just be a second line
+   parallel to the border. */
+
+/*
+ * Was gold text produced by clipping a gradient to the glyphs. That is a bad
+ * bet in monochrome twice over: the clip renders as flat mid-gray letters on
+ * a gray band (weak), and if any print path ever drops background-clip the
+ * `color: transparent` fallback makes the document's own title vanish.
+ * Plain white, one step larger, with open tracking — تست-چاپ.html §2 الف.
+ */
+.inv-doc-title {
+  justify-self: start;
+  min-width: 34mm;
+  max-width: 100%;
+  padding: 0.5mm 1mm;
+  font-size: calc(16.5pt * var(--doc-font-scale));
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--band-ink);
+  cursor: text;
+}
+
+/* Brand block: logo chip stacked above the company name, centered in the
+   band — the grid's 1fr side columns keep this column (and therefore the
+   logo itself) on the sheet's exact horizontal center. */
+.inv-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* Wider than before the tagline line was removed: that freed-up height
+     goes to breathing room here and to a bigger logo below, rather than
+     the name collapsing straight up against the mark. */
+  gap: 2.2mm;
+  min-width: 0;
+}
+
+/* No plate behind the mark: it existed to lift a logo off a dark band. The
+   mark is line art on light paper now and needs nothing behind it. */
+.inv-logo-chip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1mm;
+}
+
+/* Greyscaled so the on-screen sheet matches what the mono laser produces;
+   the source artwork stays untouched. Same for the stamp below. */
+.inv-logo,
+.inv-signature-stamp {
+  filter: grayscale(1);
+}
+
+.inv-logo {
+  display: block;
+  object-fit: contain;
+}
+
+/* `display` declarations above can otherwise override the browser's native
+   [hidden] rule and expose the broken image's alt text for «سایر». */
+.inv-logo-chip[hidden],
+.inv-logo[hidden] {
+  display: none !important;
+}
+
+.orientation-landscape .inv-logo {
+  width: 17mm;
+  height: 17mm;
+}
+
+.orientation-portrait .inv-logo {
+  width: 25mm;
+  height: 25mm;
+}
+
+.inv-brand-text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6mm;
+  text-align: center;
+}
+
+.inv-brand-text h1 {
+  font-size: calc(12.5pt * var(--doc-font-scale));
+  line-height: 1.25;
+  font-weight: 800;
+  color: var(--band-ink);
+  letter-spacing: 0.01em;
+}
+
+.inv-custom-company-name-wrap[hidden] {
+  display: none !important;
+}
+
+.inv-custom-company-name-input {
+  width: 55mm;
+  max-width: 100%;
+  padding: 1.2mm 2mm;
+  border: 1px solid var(--ink);
+  border-radius: 1mm;
+  outline: none;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  font-size: calc(10pt * var(--doc-font-scale));
+  font-weight: 700;
+  text-align: center;
+}
+
+.inv-custom-company-name-input:focus {
+  box-shadow: 0 0 0 0.5mm rgb(0 0 0 / 12%);
+}
+
+@media screen {
+  .invoice-sheet[data-company="other"] .inv-company-name-display {
+    display: none;
+  }
+}
+
+.orientation-portrait .inv-brand-text h1 {
+  font-size: calc(15pt * var(--doc-font-scale));
+}
+
+.inv-brand-text span {
+  display: block;
+  color: var(--accent-2);
+  font-size: calc(7.6pt * var(--doc-font-scale));
+  letter-spacing: 0.02em;
+}
+
+/* Date / invoice-number block, at the band's far end. Two-column grid so
+   both rows' labels and values line up in shared columns. */
+.inv-meta {
+  justify-self: end;
+  display: grid;
+  grid-template-columns: auto auto;
+  justify-content: end;
+  align-items: baseline;
+  gap: 1.4mm 2mm;
+  font-size: calc(8.2pt * var(--doc-font-scale));
+}
+
+.inv-meta div {
+  display: contents;
+}
+
+.inv-meta dt {
+  white-space: nowrap;
+  color: var(--band-muted);
+}
+
+.inv-meta .inv-input {
+  width: 27mm;
+  text-align: end;
+}
+
+.inv-meta-validity dd {
+  display: flex;
+  align-items: center;
+  gap: 1.5mm;
+}
+
+.inv-meta .inv-meta-validity-select {
+  width: auto;
+  min-width: 0;
+  flex: none;
+  text-align: end;
+  cursor: pointer;
+}
+
+/* Mirror image of .no-print (see @media print further down): the resolved
+   value field is redundant on screen in the "today"/"tomorrow" modes, since
+   the mode select's own option text already says what it holds — app.js
+   toggles this class off only in "manual" mode, where the field is the only
+   place to type the date. Print never sees this rule, so the printed value
+   always shows regardless of mode. */
+@media screen {
+  .no-screen {
+    display: none;
+  }
+}
+
+/* ---------- Seller / buyer cards ---------- */
+
+.inv-parties {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4mm;
+  margin-block: 2.2mm 1.8mm;
+  break-inside: avoid;
+}
+
+.inv-card {
+  border: 1px solid var(--line);
+  border-radius: 2.5mm;
+  overflow: hidden;
+  background: var(--paper);
+}
+
+.inv-card-head {
+  display: flex;
+  align-items: center;
+  gap: 2mm;
+  padding: 1.1mm 3mm;
+  background: var(--band-grad);
+  color: var(--band-ink);
+  border-bottom: 0.35mm solid var(--ink);
+  font-size: calc(8.8pt * var(--doc-font-scale));
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+
+.inv-card-head-mark {
+  flex: none;
+  width: 2mm;
+  height: 2.6mm;
+  border-radius: 0.5mm;
+  background: var(--accent-grad);
+}
+
+.inv-card-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.7mm 6mm;
+  padding: 1.2mm 3mm 1.4mm;
+}
+
+.inv-field {
+  display: flex;
+  align-items: baseline;
+  gap: 1.6mm;
+  min-width: 0;
+}
+
+.inv-field-wide {
+  grid-column: 1 / -1;
+}
+
+.inv-field-label {
+  flex: none;
+  color: var(--muted);
+  font-size: calc(7.4pt * var(--doc-font-scale));
+  font-weight: 500;
+}
+
+.inv-field-label::after {
+  content: ":";
+}
+
+.inv-field-value.inv-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 0 0.4mm;
+  border-bottom: 1px dotted var(--line);
+  font-size: calc(9.2pt * var(--doc-font-scale));
+  font-weight: 700;
+}
+
+/* ---------- Table ---------- */
+
+.inv-table-frame {
+  border: 1px solid var(--line);
+  border-radius: 2mm;
+  overflow: hidden;
+  break-inside: avoid;
+}
+
+.inv-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.inv-table th,
+.inv-table td {
+  padding: 0.65mm 1.6mm;
+  border: none;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: middle;
+  text-align: center;
+  /* Long unbroken figures may break anywhere; prose may not (see the
+     description column's override below). */
+  overflow-wrap: anywhere;
+  line-height: 1.35;
+}
+
+/* Vertical hairlines between columns (skipping the screen-only delete
+   column's seam, which disappears in print anyway). */
+.inv-table td + td {
+  border-inline-start: 1px solid var(--line-soft);
+}
+
+.inv-table th + th {
+  border-inline-start: 1px solid var(--band-line);
+}
+
+.inv-table th {
+  padding-block: 1.3mm;
+  background: var(--band-grad);
+  border-bottom: 0.5mm solid var(--ink);
+  font-weight: 800;
+  font-size: 0.88em;
+  line-height: 1.3;
+  color: var(--band-ink);
+}
+
+/* "ردیف" is a fixed four-character word — force it onto one line. */
+.inv-table th:nth-child(2) {
+  padding-inline: 0.8mm;
+  white-space: nowrap;
+}
+
+.inv-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.inv-table td.no-print,
+.inv-table th.no-print {
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+/* Right-align the description column and every financial column so figures
+   read as a scannable ledger; qty/unit stay centered (short tokens). */
+.inv-table th:nth-child(3),
+.inv-table td:has(.cell-input[data-row-field="description"]) {
+  text-align: right;
+  /* Prose, not a figure: wrap between words and only break inside one when a
+     single word genuinely cannot fit. */
+  overflow-wrap: break-word;
+}
+
+.inv-table th:nth-child(6),
+.inv-table th:nth-child(7),
+.inv-table th:nth-child(8),
+.inv-table th:nth-child(9),
+.inv-table td:has(.cell-input[data-row-field="unitPrice"]),
+.inv-table td:has(.cell-input[data-row-field="discount"]),
+.inv-table td[data-row-computed] {
+  text-align: right;
+}
+
+/*
+ * Every column is a percentage of the table's own width — never mm or px —
+ * so `table-layout: fixed` distributes the one authored width unambiguously
+ * between screen and print. The delete column is hidden outright in print,
+ * which rescales the remaining ratios uniformly. Widths pull from the
+ * --col-* custom properties set per orientation above; .inv-summary's grid
+ * below reads the same variables rather than duplicating the numbers.
+ */
+.col-del { width: var(--col-del); }
+.col-row { width: var(--col-row); }
+.col-desc { width: var(--col-desc); }
+.col-qty { width: var(--col-qty); }
+.col-unit { width: var(--col-unit); }
+.col-price { width: var(--col-price); }
+.col-total { width: var(--col-total); }
+.col-discount { width: var(--col-discount); }
+.col-net { width: var(--col-net); }
+
+.inv-table tr {
+  break-inside: avoid;
+}
+
+.inv-table thead {
+  display: table-header-group;
+}
+
+.inv-table tbody tr:nth-child(even) td {
+  background: var(--surface);
+}
+
+/* Row number in a small accent badge — mirrors the reference design's
+   numbered chips without overpowering the row. */
+/* Was a filled chip behind every row number. Unfilled now, like everything
+   else — the number alone reads fine in a column that narrow. */
+.row-index-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 3.7mm;
+  color: var(--ink);
+  font-size: 0.86em;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.cell-computed {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---------- Amount in words ---------- */
+
+.inv-amount-words {
+  display: flex;
+  align-items: baseline;
+  gap: 2.5mm;
+  margin-block: 1.2mm;
+  padding: 0.9mm 3mm;
+  border: 1px solid var(--ink);
+  border-radius: 2mm;
+  break-inside: avoid;
+}
+
+.inv-amount-words-label {
+  flex: none;
+  font-weight: 800;
+  font-size: 0.97em;
+}
+
+.inv-amount-words-label::after {
+  content: "\00a0\2013\00a0"; /* NBSP – NBSP */
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.inv-amount-words-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted-strong);
+}
+
+/* ---------- Summary ---------- */
+
+/*
+ * The table is RTL, so visually (left to right) its columns run
+ * net → discount → total → price → …. This grid is deliberately flipped to
+ * `direction: ltr` so its first column sits at the sheet's left edge too —
+ * its width is the sum of the table's net + discount + total columns (the
+ * same three "amount" columns that visually occupy that left span), so the
+ * totals box sits exactly under the figures it sums.
+ */
+/* Three columns: totals at the sheet's left edge (aligned under the amount
+   columns), then the buyer and seller signature boxes filling the rest —
+   the seller box (last DOM child in this ltr grid) lands rightmost, where
+   an RTL document expects it. Boxes stretch to the totals box's height, so
+   the stamp gets a tall zone without a separate signature band below. */
+/*
+ * Four cells: totals, notes, buyer stamp, seller stamp.
+ *
+ * The stamp boxes are sized to the stamp (--sig-w/--sig-h below) instead of
+ * splitting the leftover width in half, which used to leave ~45mm of blank
+ * paper on either side of a 36mm stamp. Notes then absorbs the width that
+ * frees up — it used to be a full-width one-line strip above this row, so
+ * moving it in here fills the gap AND buys back its old vertical band.
+ *
+ * Landscape has room for all four side by side. Portrait does not (it would
+ * squeeze notes to ~26mm), so there notes takes its own full-width row and
+ * the totals box spans the slack underneath it.
+ */
+.inv-summary {
+  display: grid;
+  direction: ltr;
+  column-gap: 4mm;
+  row-gap: 1.4mm;
+  align-items: stretch;
+  break-inside: avoid;
+}
+
+.orientation-landscape .inv-summary {
+  grid-template-columns: var(--totals-span) 1fr var(--sig-w) var(--sig-w);
+  grid-template-areas: "totals notes buyer seller";
+}
+
+.orientation-portrait .inv-summary {
+  grid-template-columns: var(--totals-span) 1fr var(--sig-w) var(--sig-w);
+  grid-template-areas:
+    "notes  notes  notes  notes"
+    "totals totals buyer  seller";
+}
+
+.inv-totals { grid-area: totals; }
+.inv-notes { grid-area: notes; }
+.inv-signature-buyer { grid-area: buyer; }
+.inv-signature-seller { grid-area: seller; }
+
+/* Dark totals box; the payable line at its foot is the loudest element on
+   the page — an accent-gradient band with dark text. */
+.inv-totals {
+  direction: rtl;
+  display: flex;
+  flex-direction: column;
+  background: var(--band-grad);
+  color: var(--band-ink);
+  border: var(--edge) solid var(--ink);
+  border-radius: 2.5mm;
+  overflow: hidden;
+  padding-top: 0;
+}
+
+/*
+ * Flexbox rather than `grid-template-columns: 1fr auto`: an `auto`-sized
+ * grid track grows to fit its content with no upper bound, so a very large
+ * total would silently overflow the box. `flex: 1 1 auto; min-width: 0` on
+ * the value gives it a real, container-bounded clientWidth, which is what
+ * lets the numeric auto-fit in app.js (scrollWidth vs clientWidth) detect
+ * and shrink an overflowing value at all.
+ */
+.inv-totals > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3mm;
+  min-height: 4.3mm;
+  padding: 0.6mm 3mm;
+  font-size: 0.97em;
+  /* The box stretches to the signature blocks' height (grid row), which is
+     taller than five compact rows — distribute that extra height evenly
+     across the rows instead of leaving one dead dark block above the gold
+     payable band. */
+  flex: 1 1 auto;
+}
+
+.inv-totals > div + div {
+  border-top: 1px solid var(--band-line);
+}
+
+.inv-totals > div > span {
+  flex: 0 0 auto;
+  color: var(--band-muted);
+  font-weight: 500;
+}
+
+.inv-totals strong {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: end;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--band-ink);
+}
+
+.inv-tax-row {
+  flex-wrap: nowrap;
+}
+
+.inv-tax-row > span {
+  display: flex;
+  align-items: baseline;
+  gap: 1mm;
+  flex-wrap: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* No gap, and the field only as wide as two digits: the parentheses have to
+   close up around the number or it prints as "( ۱۰ ٪)" with air on both
+   sides of the digits. */
+.inv-tax-percent-wrap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0;
+  white-space: nowrap;
+  flex: none;
+}
+
+/* More specific than the generic `.inv-input` rule below (width: 100%) so
+   this field stays compact instead of stretching its flex wrapper. */
+.inv-tax-percent-wrap .inv-tax-percent.inv-input {
+  width: 4.6mm;
+  flex: none;
+  padding: 0;
+  text-align: center;
+}
+
+/*
+ * The page's loudest element, and the hardest thing to make loud without
+ * color. It sits at the foot of a dark totals box, so a *light* fill is the
+ * strongest available contrast — and it costs almost no toner. The heavy
+ * dark rule around it is what makes it read as the hero rather than as an
+ * empty gap: تست-چاپ.html §3 د.
+ */
+/*
+ * The foot of the totals box, not a box of its own.
+ *
+ * This used to draw its own 0.8mm ring with an inset box-shadow, which landed
+ * immediately inside the totals box's 0.6mm border — two parallel rules of
+ * different weights, the inner one with square corners against the outer
+ * one's rounded ones. Nothing else on the sheet does that, which is exactly
+ * why it read as foreign.
+ *
+ * Now it is simply the last row, marked off by one rule at the page's normal
+ * --edge weight, and the emphasis comes from type size and the light fill —
+ * the same vocabulary every other block uses.
+ */
+.inv-totals .inv-total-final {
+  margin-top: auto;
+  flex: 0 0 auto;
+  background: var(--pay-fill);
+  color: var(--accent-ink);
+  min-height: 11mm;
+  padding-block: 1.8mm;
+  border-top: var(--edge) solid var(--ink) !important;
+}
+
+/* Extra .inv-totals qualifier: must out-rank `.inv-totals > div > span`
+   above (0-1-2), which a bare `.inv-total-final > span` (0-1-1) loses to. */
+.inv-totals .inv-total-final > span {
+  color: var(--accent-ink);
+  opacity: 0.82;
+  font-weight: 800;
+}
+
+/* The largest type on the sheet — this is where the emphasis now lives. */
+.inv-total-final strong {
+  color: var(--accent-ink);
+  font-size: 1.75em;
+  font-weight: 800;
+}
+
+/*
+ * Notes. Was a one-line full-width strip above the summary row; it now lives
+ * inside that row (see .inv-summary) as a proper tall box, which both fills
+ * the width freed by shrinking the stamp boxes and hands its old horizontal
+ * band back to the items table.
+ *
+ * The textarea still auto-grows (autoGrowNotes in app.js) so a long note is
+ * never clipped in print — it just makes this box, and therefore the whole
+ * row, taller, and the row-filler in app.js hands back table rows to pay for
+ * it.
+ */
+.inv-notes {
+  direction: rtl;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5mm;
+  border: 1px solid var(--line);
+  border-radius: 2mm;
+  padding: 1.1mm 3mm 1.4mm;
+  min-width: 0;
+  break-inside: avoid;
+}
+
+.inv-notes-label {
+  flex: none;
+  font-size: 0.86em;
+  font-weight: 700;
+  color: var(--muted-strong);
+}
+
+.inv-textarea {
+  flex: 1 1 auto;
+  resize: none;
+  font-family: inherit;
+  font-size: 0.92em;
+  line-height: 1.55;
+  overflow: hidden;
+}
+
+/* ---------- Signatures ---------- */
+
+/*
+ * Sized from the stamp outwards (--sig-w/--sig-h on .invoice-sheet), not from
+ * whatever width was left over. The old box was ~85x48mm around a 36mm stamp,
+ * i.e. mostly blank paper on all four sides. Both boxes take the same values
+ * so the buyer's empty box and the seller's stamped one stay a matched pair.
+ */
+.inv-signature-block {
+  direction: rtl;
+  border: 1px solid var(--line);
+  border-radius: 2.5mm;
+  padding: 1.1mm 2.6mm 1.4mm;
+  display: flex;
+  flex-direction: column;
+  gap: 0.8mm;
+  min-height: var(--sig-h);
+}
+
+.inv-signature-label {
+  font-size: 0.86em;
+  font-weight: 700;
+  color: var(--muted-strong);
+  display: flex;
+  align-items: center;
+  gap: 1.6mm;
+}
+
+.inv-signature-label::before {
+  content: "";
+  flex: none;
+  width: 1.8mm;
+  height: 1.8mm;
+  border-radius: 0.5mm;
+  background: var(--ink);
+}
+
+/* The stamp/signature zone fills whatever height the block has left after
+   its label — and the stamp image is kept strictly INSIDE it (max 95%), no
+   overflow. To enlarge the stamp later, raise .inv-signature-block's
+   min-height (per orientation above); the image scales with the box. */
+.inv-signature-area {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+}
+
+/* Absolutely positioned so the image's large intrinsic size can never
+   inflate the box (it would otherwise drive the grid row's height);
+   inset+margin centers it, max-* keeps it strictly inside. The 36mm cap
+   holds the stamp at a realistic physical size (a real ink stamp is
+   ~3-4cm) even when the box is much taller — raise BOTH numbers here if a
+   bigger stamp is ever wanted. */
+.inv-signature-stamp {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  max-width: min(95%, 36mm);
+  max-height: min(95%, 36mm);
+  object-fit: contain;
+}
+
+/* ---------- Footer band ---------- */
+
+.inv-footer {
+  /* Anchored to the sheet's bottom edge; the 2.2mm is the minimum gap when
+     content actually fills the page. */
+  margin-top: auto;
+  padding: 1.6mm 4.5mm;
+  background: var(--band-fill);
+  color: var(--band-ink);
+  border: var(--edge) solid var(--ink);
+  border-radius: 2.5mm;
+  font-size: 0.94em;
+  break-inside: avoid;
+  position: relative;
+}
+
+/* Same as the header: the box's own border replaces the separate rule. */
+
+/*
+ * One centered line, sized up: the website is the only thing in the band, so
+ * it gets the whole band's presence instead of competing with a phone number
+ * and a two-line address. Tracking is opened up because a lowercase latin URL
+ * set centered on a dark band reads as a plate, not as body text.
+ */
+.inv-footer-site {
+  display: block;
+}
+
+/*
+ * width:100% rather than auto — an <input> sized `auto` collapses to its
+ * default ~20-character box, which silently clipped the last character off
+ * www.fouladbonyan.com. Centering is done by text-align, not by the box.
+ *
+ * Deliberately NOT the document font. The website is the only latin string on
+ * an otherwise Persian sheet, so setting it apart is honest rather than
+ * inconsistent — and Vazirmatn's latin at bold reads as a UI label, not as a
+ * wordmark. A serif at a light weight with open tracking is what makes the
+ * band feel finished. These are Windows system faces, so nothing is added to
+ * the app's offline payload; the stack degrades through Palatino → Georgia →
+ * any serif.
+ */
+.inv-footer-site-input.inv-input {
+  width: 100%;
+  text-align: center;
+  font-family: Georgia, "Palatino Linotype", "Book Antiqua", serif;
+  font-size: calc(12pt * var(--doc-font-scale));
+  font-weight: 400;
+  letter-spacing: 0.12em;
+}
+
+
+
+/* ---------- Editable fields (screen) ---------- */
+
+.inv-input,
+.inv-textarea,
+.cell-input {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed #cbc7bd;
+  border-radius: 0;
+  padding: 0.5px 1px;
+  width: 100%;
+  min-width: 0;
+  text-align: inherit;
+}
+
+.inv-table .cell-input {
+  text-align: center;
+}
+
+.inv-table td:has(.cell-input[data-row-field="description"]) .cell-input {
+  text-align: start;
+}
+
+.inv-input:focus,
+.inv-textarea:focus,
+.cell-input:focus {
+  outline: none;
+  border-bottom: 1px solid var(--ink);
+  background: rgb(0 0 0 / 7%);
+}
+
+/*
+ * These three used to be dark bands, so their inputs were styled white-on-
+ * dark. The bands are white boxes now and that styling would render the
+ * fields invisible — they take the ordinary paper treatment instead. The
+ * selectors are kept (rather than deleted) because these fields still differ
+ * from the rest: they sit inside a ruled box, so their underline is lighter
+ * than a free-standing field's would be.
+ */
+.inv-head .inv-input,
+.inv-totals .inv-input,
+.inv-footer .inv-input {
+  color: var(--ink);
+  border-bottom-color: var(--line);
+}
+
+.inv-head .inv-input::placeholder,
+.inv-totals .inv-input::placeholder,
+.inv-footer .inv-input::placeholder {
+  color: var(--muted);
+}
+
+.inv-head .inv-input:focus,
+.inv-totals .inv-input:focus,
+.inv-footer .inv-input:focus {
+  border-bottom-color: var(--ink);
+  background: rgb(0 0 0 / 7%);
+}
+
+.inv-total-final .inv-input {
+  color: var(--accent-ink);
+}
+
+.inv-editable-field {
+  outline: none;
+  border-radius: 2px;
+}
+
+.inv-editable-field:focus {
+  box-shadow: 0 0 0 1px var(--ink);
+  background: rgb(0 0 0 / 7%);
+}
+
+.inv-editable-field:empty::before {
+  content: attr(data-placeholder);
+  color: var(--band-muted);
+}
+
+/* ---------- Print ---------- */
+
+@page {
+  margin: 0;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff;
+  }
+
+  .sheet-viewport {
+    padding: 0;
+    display: block;
+  }
+
+  .invoice-sheet {
+    box-shadow: none;
+    margin: 0;
+  }
+
+  /*
+   * Deliberately NOT overriding width/min-height here. The sheet must print
+   * at the exact same 297mm/210mm (or 210mm/297mm) box declared for screen —
+   * matching @page's size exactly — so the browser prints it at true 100%
+   * scale instead of fitting an "auto"-sized box into its own idea of the
+   * printable area.
+   */
+
+  /* Belt-and-suspenders: guarantee no leftover screen-preview scale factor
+     (see fitSheetScale in app.js) ever reaches the print output. */
+  .sheet-scale-wrapper,
+  .invoice-sheet {
+    zoom: 1 !important;
+    transform: none !important;
+  }
+
+  .no-print,
+  .col-del {
+    display: none !important;
+  }
+
+  /* Hiding .col-del renormalizes the table's remaining column percentages
+     over 97%; the totals box must follow or it stops meeting the column rule
+     it is aligned to. See --col-scale where it is declared. */
+  .invoice-sheet {
+    --col-scale: 1.0309;
+  }
+
+  .inv-input,
+  .inv-textarea,
+  .cell-input {
+    border-bottom: none;
+    background: transparent !important;
+  }
+
+  .inv-editable-field:focus,
+  .inv-input:focus,
+  .inv-textarea:focus,
+  .cell-input:focus {
+    box-shadow: none;
+    background: transparent;
+  }
+
+  .inv-textarea {
+    overflow: hidden;
+  }
+
+  /* An empty field's placeholder ("—", format hints) is an editing aid; on
+     a finalized printed document an empty field should just look empty. */
+  .inv-input::placeholder,
+  .inv-textarea::placeholder,
+  .inv-head .inv-input::placeholder,
+  .inv-totals .inv-input::placeholder,
+  .inv-footer .inv-input::placeholder {
+    color: transparent;
+  }
+
+  .inv-editable-field:empty::before {
+    content: "";
+  }
+
+  /* Nothing to spell out yet — the strip would print as a label and a naked
+     dash. Class kept fresh by fitStaticFields in app.js. */
+  .inv-amount-words.is-empty {
+    display: none;
+  }
+
+  /* The band holds nothing but the website now, so a profile without one
+     (کارا برج پارسه) would print an empty gray strip. `visibility` rather
+     than `display`: the band stops printing but keeps occupying its space, so
+     the page geometry — and therefore the blank-row count the filler in
+     app.js derived from the on-screen layout — stays identical either way.
+     On screen it stays visible so the field can still be typed into. Class
+     kept fresh by fitStaticFields in app.js. */
+  .inv-footer.is-empty {
+    visibility: hidden;
+  }
+}

@@ -1,0 +1,310 @@
+/* Print-first refinement layer. This intentionally overrides the older
+   stationery rules without coupling the editor chrome to the A4 template. */
+
+:root {
+  --doc-font: "Vazirmatn";
+  --doc-font-scale: 1;
+}
+
+html,
+body,
+.invoice-sheet,
+.print-document {
+  font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "ss01" 1, "tnum" 1;
+}
+
+.invoice-sheet {
+  --band-fill: #fff;
+  --surface: #e6e6e6;
+  --edge: 0.42mm;
+  --sig-w: 44mm;
+  --sig-h: 43mm;
+}
+
+.invoice-sheet.orientation-landscape {
+  padding-block: 7mm;
+  font-size: 8.8pt;
+}
+
+.invoice-sheet.orientation-portrait {
+  font-size: 9.2pt;
+}
+
+/* Formal stationery uses restrained rules, not web-card silhouettes. */
+.inv-head {
+  padding: 2.2mm 4.2mm;
+  border-width: var(--edge);
+  border-radius: 1mm;
+  background: #fff;
+}
+
+.inv-card,
+.inv-table-frame,
+.inv-amount-words,
+.inv-totals,
+.inv-notes,
+.inv-signature-block,
+.inv-footer {
+  border-radius: 0.75mm;
+}
+
+.inv-card-head {
+  padding-block: 1mm;
+  background: #fff;
+  border-bottom-width: 0.3mm;
+}
+
+.inv-card-grid { gap: 0.9mm 5mm; padding-block: 1.35mm 1.6mm; }
+.inv-field { align-items: flex-start; }
+.inv-field-label { padding-top: 0.4mm; font-size: 7.9pt; }
+.inv-field-value.inv-input { font-size: 9pt; line-height: 1.45; }
+
+.inv-readonly { cursor: default; }
+.inv-autogrow,
+.cell-textarea {
+  display: block;
+  overflow: hidden;
+  resize: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.inv-autogrow { min-height: 1.65em; }
+
+/* Editing cues exist only in the editor. They are not stationery. */
+@media screen {
+  .inv-doc-title.inv-editable-field,
+  .inv-field-value.inv-input:not(.inv-readonly),
+  .cell-input,
+  .inv-textarea,
+  .inv-meta .inv-input,
+  .inv-tax-percent,
+  .inv-footer-site-input:not(.inv-readonly) {
+    border-bottom: 1px dashed #b9b6af;
+  }
+
+  .inv-readonly { border-bottom: 0 !important; }
+  .inv-readonly:focus { background: transparent !important; }
+}
+
+.inv-table-frame { border-color: #8e9396; }
+.inv-table th { background: #fff; border-bottom-width: 0.42mm; }
+.inv-table th,
+.inv-table td { padding-block: 0.78mm; }
+.inv-table tbody tr:nth-child(even) td { background: var(--surface); }
+.inv-table tbody tr.is-blank-row .row-index-badge { color: #9da0a5; }
+
+.cell-textarea {
+  height: 1.55em;
+  min-height: 1.55em;
+  padding-block: 0;
+  font: inherit;
+  text-align: start;
+}
+
+.cell-computed,
+.cell-input-num,
+.inv-meta input,
+.inv-tax-percent,
+.inv-totals strong,
+.inv-total-final strong,
+.row-index-badge {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* The editor keeps eight ruled rows; unused rows also remain in print. */
+.inv-table-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px 2px;
+  color: #707279;
+  font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
+  font-size: 10.5px;
+}
+
+.invoice-add-row {
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding-inline: 10px;
+  border: 1px solid #aeb1b6;
+  border-radius: 6px;
+  background: #fff;
+  color: #292b2f;
+  font: inherit;
+  font-weight: 750;
+  cursor: pointer;
+}
+.invoice-add-row:hover { border-color: #6f7278; background: #f7f7f7; }
+.invoice-add-row svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; }
+
+/* A short items table is followed by purposeful white space. The commercial
+   summary and signatures form the lower anchor of the page. */
+.inv-summary { margin-top: auto; }
+.inv-footer { margin-top: 2.1mm; background: #fff; border-width: var(--edge); }
+.inv-footer-site-input.inv-input {
+  font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
+  font-size: 9.5pt;
+  font-weight: 500;
+  letter-spacing: 0.035em;
+}
+
+.inv-totals { border-width: var(--edge); }
+.inv-totals .inv-total-final { background: #f1f1f1; }
+.inv-total-final strong { font-size: 1.62em; }
+.inv-signature-stamp { max-width: min(88%, 31mm); max-height: min(88%, 31mm); }
+
+.inv-stamp-draft-note {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #999ba0;
+  font-size: 8pt;
+  text-align: center;
+}
+.invoice-sheet.stamp-enabled .inv-stamp-draft-note { display: none; }
+
+/* Validation is explicit and local. Invalid financial data is never hidden by
+   a plausible-looking total. */
+.invoice-validation {
+  margin-bottom: 2mm;
+  padding: 7px 10px;
+  border: 1px solid #cf6a73;
+  border-radius: 5px;
+  background: #fff3f4;
+  color: #8d202a;
+  font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
+  font-size: 11px;
+}
+.invoice-validation[hidden] { display: none; }
+.invoice-validation strong { display: block; }
+.invoice-validation ul { margin: 3px 0 0; padding-inline-start: 18px; }
+
+.inv-table td.has-error,
+.inv-field.has-error { position: relative; background: #fff1f2 !important; }
+.inv-table td.has-error .cell-input,
+.inv-field.has-error .inv-input,
+.inv-meta dd.has-error .inv-input { border-bottom-color: #b92734 !important; }
+.inv-table td.has-error::after,
+.inv-field.has-error::after,
+.inv-meta dd.has-error::after {
+  content: attr(data-error);
+  display: block;
+  margin-top: 1px;
+  color: #a32732;
+  font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
+  font-size: 7.5pt;
+  line-height: 1.35;
+}
+.inv-table tr.has-financial-error .cell-computed { color: #a32732; }
+.numeric-overflow { color: #a32732 !important; }
+
+/* Print clones contain text nodes rather than form controls. */
+.print-field-value {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.print-page .no-print,
+.print-page .col-del { display: none !important; }
+
+.print-page .inv-input,
+.print-page .cell-input,
+.print-page .inv-textarea,
+.print-page .print-field-value {
+  border: 0 !important;
+  outline: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.print-page .inv-field-value { font-size: 9pt; font-weight: 700; }
+.print-page .inv-field { align-items: flex-start; }
+.print-page .inv-field-label { padding-top: 0; }
+.print-page .cell-input { display: block; width: 100%; }
+.print-page .cell-textarea,
+.print-page .inv-autogrow { height: auto !important; min-height: 0; overflow: visible; }
+.print-page .inv-footer-site-input { display: block; width: 100%; text-align: center; }
+
+/* Keep the printed commercial blocks in the natural document flow. The
+   editor may use the remaining sheet height as breathing room, but an auto
+   top margin here created a large, meaningless gap after amount-in-words. */
+.print-page .inv-summary { margin-top: 2mm; }
+.print-page .inv-footer.is-empty { display: none; }
+
+/* Compact mode saves space through geometry, never through unreadable type. */
+.print-page.layout-compact .inv-head { padding-block: 1.4mm; }
+.print-page.layout-compact.orientation-landscape .inv-logo { width: 13mm; height: 13mm; }
+.print-page.layout-compact.orientation-portrait .inv-logo { width: 19mm; height: 19mm; }
+.print-page.layout-compact .inv-brand { gap: 1mm; }
+.print-page.layout-compact .inv-parties { margin-block: 1.3mm; }
+.print-page.layout-compact .inv-card-grid { padding-block: 0.8mm 1mm; gap-block: 0.35mm; }
+.print-page.layout-compact .inv-table th { padding-block: 0.85mm; }
+.print-page.layout-compact .inv-table td { padding-block: 0.42mm; line-height: 1.25; }
+.print-page.layout-compact .inv-amount-words { margin-block: 0.7mm; padding-block: 0.55mm; }
+.print-page.layout-compact { --sig-h: 39mm; --sig-w: 42mm; }
+.print-page.layout-compact .inv-totals > div { min-height: 3.9mm; padding-block: 0.4mm; }
+.print-page.layout-compact .inv-totals .inv-total-final { min-height: 9mm; }
+.print-page.layout-compact .inv-footer { padding-block: 1mm; margin-top: 1.4mm; }
+
+/* Proper continuation pages are created immediately before print. */
+.print-document { display: none; }
+.print-continuation-head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 4mm;
+  padding: 2mm 3mm;
+  margin-bottom: 2mm;
+  border-block: 0.4mm solid #000;
+}
+.print-continuation-brand { display: flex; align-items: center; gap: 2.5mm; }
+.print-continuation-brand img { width: 11mm; height: 11mm; object-fit: contain; filter: grayscale(1); }
+.print-continuation-brand strong { font-size: 11pt; }
+.print-continuation-title { text-align: center; font-size: 12pt; font-weight: 850; }
+.print-continuation-meta { text-align: end; color: #35373a; font-size: 8.3pt; line-height: 1.7; }
+.print-page-marker { margin-top: auto; padding-top: 1.5mm; border-top: 1px solid #777; color: #4b4d50; font-size: 8pt; text-align: center; }
+.print-page .print-page-number { position: absolute; inset-inline-end: 10mm; bottom: 2.5mm; color: #555; font-size: 7.5pt; }
+
+.print-document.is-measuring {
+  position: absolute;
+  inset-inline-start: -20000px;
+  top: 0;
+  display: block;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.print-page {
+  box-shadow: none !important;
+  overflow: hidden;
+}
+.print-page > * { flex-shrink: 0; }
+.print-page .numeric-overflow { color: inherit !important; }
+.print-page.orientation-landscape { width: 297mm; height: 210mm; min-height: 210mm; }
+.print-page.orientation-portrait { width: 210mm; height: 297mm; min-height: 297mm; }
+
+@media print {
+  body.print-mode #app { display: none !important; }
+  body.print-mode .print-document { display: block !important; }
+  body.print-mode .print-page {
+    display: flex;
+    margin: 0;
+    break-after: page;
+    page-break-after: always;
+  }
+  body.print-mode .print-page:last-child { break-after: auto; page-break-after: auto; }
+
+  .invoice-sheet { --col-scale: 1.0309; }
+  .inv-field-value.inv-input { border-bottom: 0 !important; }
+  .inv-head,
+  .inv-footer { background: #fff !important; }
+  .invoice-validation,
+  .inv-table-actions,
+  .inv-stamp-draft-note { display: none !important; }
+}

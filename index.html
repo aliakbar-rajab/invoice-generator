@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>پیش‌فاکتور آفلاین</title>
+<link rel="stylesheet" href="css/invoice.css" />
+<link rel="stylesheet" href="css/app.css" />
+<link rel="stylesheet" href="css/refinements.css" />
+<style id="page-size-style">@page { size: A4 landscape; margin: 0; }</style>
+</head>
+<body>
+<div id="app">
+
+  <header class="toolbar no-print">
+    <div class="toolbar-row">
+      <div class="toolbar-brand" aria-label="پیش‌فاکتور آفلاین">
+        <span class="toolbar-brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><line x1="9.5" y1="11.5" x2="15" y2="11.5"/><line x1="9.5" y1="15" x2="15" y2="15"/></svg>
+        </span>
+        <strong>پیش‌فاکتور</strong>
+      </div>
+
+      <label class="toolbar-company-control">
+        <span class="toolbar-control-label">شرکت صادرکننده</span>
+        <span class="toolbar-select-shell">
+          <svg class="toolbar-pill-icon" aria-hidden="true"><path d="M4 21V7l8-4 8 4v14"/><path d="M9.5 21v-6h5v6"/></svg>
+          <select id="company-profile" title="شرکت صادرکنندهٔ پیش‌فاکتور">
+            <option value="fouladBonyan">بنیان فولاد داریا</option>
+            <option value="karaBorjParseh">کارا برج پارسه</option>
+            <option value="other">سایر</option>
+          </select>
+          <svg class="select-chevron" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+        </span>
+      </label>
+
+      <div class="toolbar-document-block" aria-label="سند جاری">
+        <span class="toolbar-control-label">سند جاری</span>
+        <strong id="current-document-title">پیش‌فاکتور جدید</strong>
+        <div class="toolbar-status-pill">
+          <span class="status-dot" id="status-dot" aria-hidden="true"></span>
+          <span id="toolbar-status" role="status" aria-live="polite"></span>
+        </div>
+      </div>
+
+      <nav class="toolbar-actions" aria-label="عملیات اصلی سند">
+        <button type="button" id="btn-new" class="toolbar-btn" title="شروع یک پیش‌فاکتور جدید">
+          <svg><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13 3v6h6"/><line x1="12" y1="12.5" x2="12" y2="17.5"/><line x1="9.5" y1="15" x2="14.5" y2="15"/></svg>
+          <span>جدید</span>
+        </button>
+        <button type="button" id="btn-save" class="toolbar-btn" title="ذخیره در همین مرورگر (Ctrl+S)">
+          <svg><path d="M4.5 4h12l3 3v13h-15z"/><path d="M7.5 4v5h7V4"/><rect x="7.5" y="13" width="7" height="6"/></svg>
+          <span>ذخیره</span>
+        </button>
+        <div class="toolbar-saved">
+          <button type="button" id="btn-saved-list" class="toolbar-btn" title="فهرست پیش‌فاکتورهای ذخیره‌شده" aria-expanded="false">
+            <svg><path d="M6.5 3.5h11v17l-5.5-3.7-5.5 3.7z"/></svg>
+            <span>ذخیره‌شده‌ها <b class="toolbar-count" id="saved-count">۰</b></span>
+          </button>
+          <div class="saved-panel no-print" id="saved-panel" hidden>
+            <div class="saved-panel-header">
+              <strong>پیش‌فاکتورهای ذخیره‌شده</strong>
+              <button type="button" id="btn-saved-close" class="saved-panel-close" title="بستن">✕</button>
+            </div>
+            <p class="saved-panel-hint">نسخه‌های این فهرست روی همین مرورگر نگهداری می‌شوند. برای پشتیبان دائمی، از «پشتیبان فایل» استفاده کنید.</p>
+            <ul class="saved-list" id="saved-list"></ul>
+            <p class="saved-panel-empty" id="saved-empty">هنوز چیزی ذخیره نشده است.</p>
+          </div>
+        </div>
+      </nav>
+
+      <div class="toolbar-live-total" aria-label="مبلغ قابل پرداخت جاری">
+        <span>قابل پرداخت</span>
+        <strong id="toolbar-payable-total">—</strong>
+      </div>
+
+      <div class="toolbar-spacer"></div>
+
+      <div class="toolbar-settings-wrap">
+        <button type="button" id="btn-settings" class="toolbar-btn toolbar-settings-btn" aria-expanded="false" title="تنظیمات چاپ و فایل">
+          <svg><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V20.3h-3v-.08a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7 15a1.7 1.7 0 0 0-1.56-1.03H5.3v-3h.14A1.7 1.7 0 0 0 7 9.94a1.7 1.7 0 0 0-.34-1.88L6.6 8l2.12-2.12.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 11.7 4.7V4.6h3v.1a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06L19.8 8l-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.03h.14v3h-.14A1.7 1.7 0 0 0 19.4 15z"/></svg>
+          <span>تنظیمات</span>
+        </button>
+        <div class="toolbar-settings-panel" id="settings-panel" hidden>
+          <div class="settings-section">
+            <strong>جهت چاپ</strong>
+            <div class="orientation-switch" role="radiogroup" aria-label="جهت صفحه">
+              <label class="orientation-btn">
+                <input type="radio" name="orientation" value="landscape" id="orientation-landscape" checked />
+                <svg><rect x="2.5" y="6.5" width="19" height="11" rx="2"/></svg><span>افقی</span>
+              </label>
+              <label class="orientation-btn">
+                <input type="radio" name="orientation" value="portrait" id="orientation-portrait" />
+                <svg><rect x="6.5" y="2.5" width="11" height="19" rx="2"/></svg><span>عمودی</span>
+              </label>
+            </div>
+          </div>
+          <div class="settings-section settings-template-info">
+            <strong>قالب سازمانی</strong>
+            <span>وزیرمتن · اندازهٔ ثابت و استاندارد چاپ</span>
+          </div>
+          <label class="stamp-finalize-control">
+            <input type="checkbox" id="include-stamp" />
+            <span><strong>نسخهٔ نهایی با مهر شرکت</strong><small>مهر فقط پس از تکمیل و تأیید سند چاپ می‌شود.</small></span>
+          </label>
+          <div class="settings-file-actions">
+            <button type="button" id="btn-open" class="settings-action"><span>باز کردن فایل</span></button>
+            <input type="file" id="file-open" accept="application/json,.json,.pfi" hidden />
+            <button type="button" id="btn-save-as" class="settings-action"><span>ذخیره با نام جدید</span></button>
+            <button type="button" id="btn-export" class="settings-action"><span>پشتیبان فایل</span></button>
+          </div>
+        </div>
+      </div>
+
+      <button type="button" id="btn-print" class="primary" title="چاپ یا ذخیره PDF (Ctrl+P)">
+        <svg><path d="M6.5 9V3.5h11V9"/><rect x="4" y="9" width="16" height="8" rx="1.5"/><path d="M6.5 17v3.5h11V17"/></svg>
+        <span>چاپ / PDF</span>
+      </button>
+
+      <!-- Kept for backward compatibility with older saved files. Document
+           typography is intentionally fixed to the approved corporate system. -->
+      <select id="font-select" hidden><option value="vazirmatn" selected>وزیرمتن</option></select>
+      <select id="font-size-select" hidden><option value="1" selected>۱۰۰٪</option></select>
+      <span id="zoom-value" hidden>۱۰۰٪</span>
+      <button type="button" id="btn-zoom-out" hidden></button>
+      <button type="button" id="btn-zoom-in" hidden></button>
+    </div>
+  </header>
+
+  <main class="sheet-viewport">
+    <div class="sheet-scale-wrapper" id="sheet-scale-wrapper">
+    <article class="invoice-sheet orientation-landscape" id="invoice-sheet" dir="rtl" data-company="fouladBonyan">
+
+      <img class="inv-watermark" id="inv-watermark" src="assets/logo-foulad-bonyan-mark.webp" alt="" aria-hidden="true" />
+
+      <header class="inv-head">
+        <p class="inv-doc-title inv-editable-field" contenteditable="true" role="textbox" aria-label="عنوان سند" spellcheck="false" data-field="meta.title" data-placeholder="عنوان سند">پیش‌فاکتور</p>
+        <div class="inv-brand">
+          <span class="inv-logo-chip"><img src="assets/logo-foulad-bonyan-mark.webp" alt="آرم شرکت" class="inv-logo" id="inv-logo" /></span>
+          <div class="inv-brand-text">
+            <h1 id="inv-company-name" class="inv-company-name-display" dir="rtl">بنیان فولاد داریا</h1>
+            <div class="inv-custom-company-name-wrap no-print" id="custom-company-name-wrap" hidden>
+              <input type="text" id="custom-company-name" class="inv-custom-company-name-input" dir="rtl" placeholder="نام شرکت را وارد کنید" autocomplete="organization" />
+            </div>
+          </div>
+        </div>
+        <dl class="inv-meta">
+          <div>
+            <dt>تاریخ</dt>
+            <dd><input type="text" class="inv-input" dir="ltr" data-field="meta.date" placeholder="۱۴۰۳/۰۱/۰۱" /></dd>
+          </div>
+          <div>
+            <dt>شماره پیش‌فاکتور</dt>
+            <dd><input type="text" class="inv-input" dir="ltr" data-field="meta.number" placeholder="—" /></dd>
+          </div>
+          <div class="inv-meta-validity">
+            <dt>اعتبار پیش‌فاکتور</dt>
+            <dd>
+              <select class="inv-input inv-meta-validity-select no-print" id="meta-validity-mode" title="نحوهٔ تعیین اعتبار پیش‌فاکتور را انتخاب کنید">
+                <option value="today" selected>پایان روز جاری</option>
+                <option value="tomorrow">فردا (محاسبهٔ خودکار)</option>
+                <option value="manual">تاریخ دلخواه</option>
+              </select>
+              <input type="text" class="inv-input no-screen" dir="ltr" data-field="meta.validity" placeholder="۱۴۰۳/۰۱/۰۲" />
+            </dd>
+          </div>
+        </dl>
+      </header>
+
+      <section class="inv-parties">
+        <div class="inv-card" aria-label="مشخصات فروشنده">
+          <header class="inv-card-head"><span class="inv-card-head-mark" aria-hidden="true"></span>مشخصات فروشنده</header>
+          <div class="inv-card-grid">
+            <div class="inv-field inv-field-wide">
+              <span class="inv-field-label">نام شخص حقیقی / حقوقی</span>
+              <input type="text" class="inv-input inv-field-value inv-readonly" dir="rtl" data-field="seller.name" readonly />
+            </div>
+            <div class="inv-field inv-field-wide">
+              <span class="inv-field-label">نشانی</span>
+              <textarea class="inv-input inv-field-value inv-readonly inv-autogrow" dir="rtl" data-field="seller.address" rows="1" readonly></textarea>
+            </div>
+            <div class="inv-field">
+              <span class="inv-field-label">شناسه ملی</span>
+              <input type="text" class="inv-input inv-field-value inv-readonly" dir="ltr" data-field="seller.nationalId" readonly />
+            </div>
+            <div class="inv-field">
+              <span class="inv-field-label">کد پستی</span>
+              <input type="text" class="inv-input inv-field-value inv-readonly" dir="ltr" data-field="seller.postalCode" readonly />
+            </div>
+            <div class="inv-field inv-field-wide">
+              <span class="inv-field-label">تلفن</span>
+              <textarea class="inv-input inv-field-value inv-readonly inv-autogrow" dir="ltr" data-field="seller.phone" rows="1" readonly></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="inv-card" aria-label="مشخصات خریدار">
+          <header class="inv-card-head"><span class="inv-card-head-mark" aria-hidden="true"></span>مشخصات خریدار</header>
+          <div class="inv-card-grid">
+            <div class="inv-field inv-field-wide">
+              <span class="inv-field-label">نام شخص حقیقی / حقوقی</span>
+              <input type="text" class="inv-input inv-field-value" dir="rtl" data-field="buyer.name" placeholder="—" />
+            </div>
+            <div class="inv-field inv-field-wide">
+              <span class="inv-field-label">نشانی</span>
+              <textarea class="inv-input inv-field-value inv-autogrow" dir="rtl" data-field="buyer.address" rows="1" placeholder="نشانی کامل خریدار"></textarea>
+            </div>
+            <div class="inv-field">
+              <span class="inv-field-label">شناسه ملی</span>
+              <input type="text" class="inv-input inv-field-value" dir="ltr" data-field="buyer.nationalId" placeholder="—" />
+            </div>
+            <div class="inv-field">
+              <span class="inv-field-label">کد پستی</span>
+              <input type="text" class="inv-input inv-field-value" dir="ltr" data-field="buyer.postalCode" placeholder="—" />
+            </div>
+            <div class="inv-field inv-field-wide">
+              <span class="inv-field-label">تلفن</span>
+              <textarea class="inv-input inv-field-value inv-autogrow" dir="ltr" data-field="buyer.phone" rows="1" placeholder="—"></textarea>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="invoice-validation no-print" id="invoice-validation" hidden role="alert">
+        <strong>لطفاً موارد مشخص‌شده را اصلاح کنید.</strong>
+        <ul id="invoice-validation-list"></ul>
+      </div>
+
+      <div class="inv-table-frame">
+      <table class="inv-table">
+        <colgroup>
+          <col class="col-del" />
+          <col class="col-row" />
+          <col class="col-desc" />
+          <col class="col-qty" />
+          <col class="col-unit" />
+          <col class="col-price" />
+          <col class="col-total" />
+          <col class="col-discount" />
+          <col class="col-net" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="no-print"></th>
+            <th>ردیف</th>
+            <th>شرح کالا یا خدمات</th>
+            <th>تعداد / مقدار</th>
+            <th>واحد</th>
+            <th>مبلغ واحد (ریال)</th>
+            <th>مبلغ کل (ریال)</th>
+            <th>تخفیف (ریال)</th>
+            <th>مبلغ پس از تخفیف (ریال)</th>
+          </tr>
+        </thead>
+        <tbody id="inv-rows"></tbody>
+      </table>
+      </div>
+      <div class="inv-table-actions no-print">
+        <button type="button" id="btn-add-row" class="invoice-add-row">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>افزودن قلم جدید</span>
+        </button>
+        <span>برای رفتن به همین ستون در ردیف بعد، Enter بزنید.</span>
+      </div>
+
+      <section class="inv-amount-words">
+        <span class="inv-amount-words-label">مبلغ به حروف</span>
+        <span class="inv-amount-words-value" data-total="netTotalWords">صفر ریال</span>
+      </section>
+
+      <section class="inv-summary">
+        <div class="inv-totals">
+          <div>
+            <span>جمع کل</span>
+            <strong data-total="grossTotal">۰ ریال</strong>
+          </div>
+          <div>
+            <span>جمع تخفیف</span>
+            <strong data-total="discountTotal">۰ ریال</strong>
+          </div>
+          <div>
+            <span>جمع کل پس از تخفیف</span>
+            <strong data-total="afterDiscountTotal">۰ ریال</strong>
+          </div>
+          <div class="inv-tax-row">
+            <span>
+              مالیات و عوارض
+<span class="inv-tax-percent-wrap">(<input type="text" inputmode="decimal" class="inv-input inv-tax-percent" data-field="taxPercent" value="۱۰" />٪)</span>
+            </span>
+            <strong data-total="taxTotal">۰ ریال</strong>
+          </div>
+          <div class="inv-total-final">
+            <span>مبلغ قابل پرداخت</span>
+            <strong data-total="netTotal">۰ ریال</strong>
+          </div>
+        </div>
+        <div class="inv-notes">
+          <span class="inv-notes-label">توضیحات</span>
+          <textarea class="inv-input inv-textarea" dir="rtl" data-field="notes" rows="1" placeholder=""></textarea>
+        </div>
+
+        <div class="inv-signature-block inv-signature-buyer">
+          <p class="inv-signature-label">مهر و امضای خریدار</p>
+          <div class="inv-signature-area"></div>
+        </div>
+        <div class="inv-signature-block inv-signature-seller">
+          <p class="inv-signature-label">مهر و امضای فروشنده</p>
+          <div class="inv-signature-area">
+            <img src="" alt="مهر شرکت" class="inv-signature-stamp" id="inv-stamp" hidden />
+          </div>
+        </div>
+      </section>
+
+      <!--
+        The footer band is now a single centered line: the website, and only
+        the website. Address and phone used to share it, which both crowded
+        the site out and repeated the seller card verbatim — that card still
+        carries them, so nothing is lost from the page.
+      -->
+      <footer class="inv-footer">
+        <p class="inv-footer-site">
+          <input type="text" class="inv-input inv-footer-site-input" dir="auto" data-field="company.website" aria-label="متن فوتر" placeholder="متن فوتر را وارد کنید" />
+        </p>
+      </footer>
+
+    </article>
+    </div>
+  </main>
+</div>
+
+<div class="print-document" id="print-document" aria-hidden="true"></div>
+
+<div class="app-dialog-backdrop no-print" id="app-dialog" hidden>
+  <section class="app-dialog" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title" aria-describedby="app-dialog-message">
+    <h2 id="app-dialog-title"></h2>
+    <p id="app-dialog-message"></p>
+    <ul id="app-dialog-details" hidden></ul>
+    <label class="app-dialog-input-wrap" id="app-dialog-input-wrap" hidden>
+      <span>نام سند</span>
+      <input type="text" id="app-dialog-input" autocomplete="off" />
+    </label>
+    <div class="app-dialog-actions" id="app-dialog-actions"></div>
+  </section>
+</div>
+
+<template id="row-template">
+  <tr>
+    <td class="no-print"><button type="button" class="row-delete" tabindex="-1" title="حذف ردیف">✕</button></td>
+    <td class="row-index"><span class="row-index-badge"></span></td>
+    <td><textarea rows="1" class="cell-input cell-textarea" data-row-field="description"></textarea></td>
+    <td><input type="text" inputmode="decimal" class="cell-input cell-input-num" data-row-field="quantity" /></td>
+    <td><input type="text" class="cell-input" data-row-field="unit" /></td>
+    <td><input type="text" inputmode="decimal" class="cell-input cell-input-num" data-row-field="unitPrice" /></td>
+    <td class="cell-computed" data-row-computed="total">۰</td>
+    <td><input type="text" inputmode="decimal" class="cell-input cell-input-num" data-row-field="discount" /></td>
+    <td class="cell-computed" data-row-computed="afterDiscount">۰</td>
+  </tr>
+</template>
+
+<script src="js/persian-numbers.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+# Local development and editor settings
+.claude/
+.vscode/
+.idea/
+
+# Operating-system files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Temporary files and logs
+*.tmp
+*.temp
+*.log
+~$*
