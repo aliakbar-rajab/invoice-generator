@@ -33,6 +33,10 @@
   var stampAvailable = false;
   var lastProfileKey = null;
   var pendingCompanyLogoData = "";
+  // The catch-all «سایر» profile is document-scoped rather than a reusable
+  // company identity. Keep its branding outside COMPANY_PROFILES so opening
+  // one ad-hoc invoice can never leak its logo or stamp into the next one.
+  var adHocCompanyAssets = { logo: "", stamp: "" };
   var MIN_INVOICE_ROWS = 8;
 
   // True while meta.number still holds a live suggestion (set by blankInvoice
@@ -41,6 +45,14 @@
   // the number under the newly-picked company's own sequence (see SEQ_KEY_
   // PREFIX) without ever clobbering a number the user actually typed.
   var numberIsAutoSuggested = false;
+
+  var ROW_FIELD_LABELS = {
+    description: "شرح کالا یا خدمت",
+    quantity: "تعداد یا مقدار",
+    unit: "واحد",
+    unitPrice: "مبلغ واحد",
+    discount: "تخفیف",
+  };
 
   // ---------- Company profiles ----------
   // Add a new profile here and it becomes selectable from the toolbar
@@ -470,8 +482,28 @@
     };
   }
 
+  // Reusable profile assets already live in CUSTOM_PROFILES_KEY or
+  // PROFILE_ASSETS_KEY. Browser-saved invoices only need the profile key;
+  // embedding the same multi-megabyte data URL in every entry quickly fills
+  // localStorage. File exports still use collectInvoiceData() directly and
+  // therefore remain self-contained for transfer to another computer.
+  function dataForBrowserStorage(data) {
+    var stored = Object.assign({}, data, {
+      company: Object.assign({}, data.company),
+    });
+    if (!isCustomProfile(stored.company.profile)) {
+      delete stored.company.logo;
+      delete stored.company.stamp;
+    }
+    return stored;
+  }
+
   function isCustomProfile(profileKey) {
     return profileKey === CUSTOM_PROFILE_KEY;
+  }
+
+  function resetAdHocCompanyAssets() {
+    adHocCompanyAssets = { logo: "", stamp: "" };
   }
 
   function setCustomCompanyMode(profileKey, companyName) {
@@ -533,6 +565,18 @@
     }
   }
 
+  function refreshLiveInvoiceNumber() {
+    if (!numberIsAutoSuggested) return false;
+    var numberInput = document.querySelector('[data-field="meta.number"]');
+    if (!numberInput) return false;
+    var latest = suggestInvoiceNumber(profileSelectEl.value);
+    if (!latest || latest === numberInput.value) return false;
+    numberInput.value = latest;
+    fitNumericEl(numberInput);
+    updateDocumentIdentity();
+    return true;
+  }
+
   function blankInvoice() {
     var profileKey = DEFAULT_PROFILE_KEY;
     var profile = resolveProfile(profileKey);
@@ -577,6 +621,10 @@
   function applyCompanyProfile(profileKey) {
     var profile = resolveProfile(profileKey);
     var key = COMPANY_PROFILES[profileKey] ? profileKey : DEFAULT_PROFILE_KEY;
+    resetAdHocCompanyAssets();
+    var brandingProfile = isCustomProfile(key)
+      ? Object.assign({}, profile, adHocCompanyAssets)
+      : profile;
 
     document.getElementById("inv-company-name").textContent = profile.name;
     setCustomCompanyMode(key, profile.name);
@@ -593,8 +641,8 @@
     document.querySelector('[data-field="seller.address"]').value = seller.address;
     document.querySelector('[data-field="seller.postalCode"]').value = seller.postalCode;
     document.querySelector('[data-field="seller.phone"]').value = seller.phone;
-    setCompanyBranding(key, profile);
-    setStampSrc(profile.stamp);
+    setCompanyBranding(key, brandingProfile);
+    setStampSrc(brandingProfile.stamp);
     profileSelectEl.value = key;
     lastProfileKey = key;
     refreshStampUploadPreview();
@@ -668,8 +716,10 @@
 
   function refreshStampUploadPreview() {
     if (!stampUploadPreviewEl || !stampUploadEmptyEl || !stampUploadStatusEl) return;
-    var profile = resolveProfile(profileSelectEl.value);
-    var src = stampEl.getAttribute("src") || profile.stamp || "";
+    var profileKey = profileSelectEl.value;
+    var profile = resolveProfile(profileKey);
+    var fallbackStamp = isCustomProfile(profileKey) ? adHocCompanyAssets.stamp : profile.stamp;
+    var src = stampEl.getAttribute("src") || fallbackStamp || "";
     if (src) {
       stampUploadPreviewEl.src = src;
       stampUploadPreviewEl.hidden = false;
@@ -770,7 +820,7 @@
       companyEditorAddressEl.value = document.querySelector('[data-field="seller.address"]').value;
       companyEditorPhonesEl.value = document.querySelector('[data-field="seller.phone"]').value;
       companyEditorWebsiteEl.value = document.querySelector('[data-field="company.website"]').value;
-      setCompanyLogoPreview(resolveProfile(CUSTOM_PROFILE_KEY).logo, "لوگوی فعلی شرکت سایر");
+      setCompanyLogoPreview(adHocCompanyAssets.logo, "لوگوی فعلی این سند");
     } else {
       setCompanyLogoPreview("", "");
     }
@@ -1087,6 +1137,16 @@
     fitNumericEl(el);
   }
 
+  function syncRowAccessibility(tr, rowNumber) {
+    var numberLabel = toPersianDigits(rowNumber);
+    ROW_FIELDS.forEach(function (field) {
+      var input = tr.querySelector('[data-row-field="' + field + '"]');
+      if (input) input.setAttribute("aria-label", "ردیف " + numberLabel + " — " + ROW_FIELD_LABELS[field]);
+    });
+    var deleteButton = tr.querySelector(".row-delete");
+    if (deleteButton) deleteButton.setAttribute("aria-label", "حذف ردیف " + numberLabel);
+  }
+
   // opts.focusField keeps keyboard entry in the same column when a row is
   // created through Enter or the inline Add action.
   function createRow(data, opts) {
@@ -1236,6 +1296,7 @@
 
     rows.forEach(function (tr, rowPosition) {
       var rowNumber = rowPosition + 1;
+      syncRowAccessibility(tr, rowNumber);
       var blank = rowIsBlank(tr);
       tr.classList.toggle("is-blank-row", blank);
       tr.classList.remove("has-financial-error");
@@ -1519,6 +1580,8 @@
       data.company.address = data.seller.address || "";
       data.company.phones = data.seller.phone || "";
       data.company.website = enteredWebsite;
+      data.company.logo = adHocCompanyAssets.logo;
+      data.company.stamp = adHocCompanyAssets.stamp;
     } else {
       data.company = companyFromProfile(profileKey, profile);
       data.company.website = enteredWebsite;
@@ -1620,14 +1683,18 @@
     document.getElementById("inv-company-name").textContent = data.company.name || "";
     setCustomCompanyMode(profileKey, data.company.name);
     if (customProfile) {
-      COMPANY_PROFILES[CUSTOM_PROFILE_KEY].logo = data.company.logo || "";
-      COMPANY_PROFILES[CUSTOM_PROFILE_KEY].stamp = data.company.stamp || "";
+      adHocCompanyAssets = {
+        logo: String(data.company.logo || ""),
+        stamp: String(data.company.stamp || ""),
+      };
+    } else {
+      resetAdHocCompanyAssets();
     }
-    setCompanyBranding(profileKey, customProfile ? data.company : profile);
+    profileSelectEl.value = profileKey;
+    setCompanyBranding(profileKey, customProfile ? adHocCompanyAssets : profile);
     applyHeaderGray(data.headerGray);
     stampRequested = data.includeStamp;
-    setStampSrc(customProfile ? data.company.stamp : profile.stamp);
-    profileSelectEl.value = profileKey;
+    setStampSrc(customProfile ? adHocCompanyAssets.stamp : profile.stamp);
     lastProfileKey = profileKey;
     syncStampVisibility();
 
@@ -1678,17 +1745,24 @@
     try {
       var legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
       if (!legacyRaw) return;
-      var list = loadSavedList();
+      // Read this key strictly during migration. The ordinary UI treats a
+      // corrupt list as empty so it can keep running, but migration must not
+      // overwrite an unreadable list and compound the data loss.
+      var savedRaw = localStorage.getItem(SAVED_LIST_KEY);
+      var list = savedRaw ? JSON.parse(savedRaw) : {};
+      if (!list || typeof list !== "object" || Array.isArray(list)) throw new Error("Invalid saved list");
       if (Object.keys(list).length === 0) {
         var data = JSON.parse(legacyRaw);
         var id = "inv-" + Date.now().toString(36);
         list[id] = { id: id, name: "بازیابی‌شده از نسخهٔ قبلی برنامه", savedAt: Date.now(), data: data };
         persistSavedList(list);
       }
+      // Only remove the source after the replacement write has completed.
+      // A quota/security failure must leave the legacy invoice recoverable.
       localStorage.removeItem(LEGACY_STORAGE_KEY);
     } catch (err) {
-      // Corrupt legacy data: nothing to migrate, just drop it.
-      localStorage.removeItem(LEGACY_STORAGE_KEY);
+      // Keep the source intact. A future session (or a user-created backup)
+      // may still be able to recover it once storage becomes available.
     }
   }
 
@@ -1793,12 +1867,27 @@
     }
 
     try {
-      list[currentSavedId] = { id: currentSavedId, name: name, savedAt: Date.now(), data: data };
+      // Another tab may have committed the visible live suggestion while the
+      // naming dialog was open. Rebase only untouched suggestions; manually
+      // entered and imported numbers remain exactly as authored.
+      refreshLiveInvoiceNumber();
+      data = collectInvoiceData();
+      // The naming dialog may stay open while another tab saves. Refresh the
+      // shared list immediately before writing so that tab's entries are not
+      // overwritten by the stale pre-dialog snapshot.
+      list = loadSavedList();
+      list[currentSavedId] = {
+        id: currentSavedId,
+        name: name,
+        savedAt: Date.now(),
+        data: dataForBrowserStorage(data),
+      };
       persistSavedList(list);
-      if (isNewEntry && numberIsAutoSuggested) {
-        commitInvoiceNumber(data.company.profile, data.meta.number);
-        numberIsAutoSuggested = false;
-      }
+      // Commit every valid daily-format number, not only untouched automatic
+      // suggestions. Manually corrected and file-imported numbers must also
+      // advance the counter or the next document can reuse them.
+      commitInvoiceNumber(data.company.profile, data.meta.number);
+      numberIsAutoSuggested = false;
       currentSavedName = name;
       isDirty = false;
       renderSavedList();
@@ -1964,11 +2053,20 @@
   }
 
   function printableSourceRows() {
-    return Array.prototype.slice.call(rowsBody.querySelectorAll("tr"));
+    var rows = Array.prototype.slice.call(rowsBody.querySelectorAll("tr"));
+    var filled = rows.filter(function (tr) { return !rowIsBlank(tr); });
+    var fillerCount = Math.max(0, MIN_INVOICE_ROWS - filled.length);
+    var fillers = rows.filter(rowIsBlank).slice(0, fillerCount);
+    // Keep the familiar eight ruled rows on short invoices, but never let
+    // extra Enter-created empty rows manufacture blank printed pages.
+    return filled.concat(fillers);
   }
 
   function makeContinuationHeader(pageNo, totalPages) {
-    var profile = resolveProfile(profileSelectEl.value);
+    var profileKey = profileSelectEl.value;
+    var profile = isCustomProfile(profileKey)
+      ? Object.assign({}, resolveProfile(profileKey), adHocCompanyAssets)
+      : resolveProfile(profileKey);
     var number = document.querySelector('[data-field="meta.number"]').value;
     var date = document.querySelector('[data-field="meta.date"]').value;
     var header = document.createElement("header");
@@ -2085,7 +2183,7 @@
       if (!pageFits(candidate)) break;
       count = i;
     }
-    return Math.max(count, rows.length ? 1 : 0);
+    return count;
   }
 
   function maxFittingSuffix(rows, options) {
@@ -2095,7 +2193,7 @@
       if (!pageFits(candidate)) break;
       count = i;
     }
-    return Math.max(count, rows.length ? 1 : 0);
+    return count;
   }
 
   function buildPrintPlan(rows, orientation) {
@@ -2115,6 +2213,15 @@
       pageNo: 2,
       totalPages: 2,
     });
+    if (rows.length && finalCount === 0) {
+      return {
+        compact: compact,
+        chunks: [],
+        orientation: orientation,
+        overflowRowIndex: rows.length - 1,
+        overflowKind: "final-page",
+      };
+    }
     // Do not crowd the final page while leaving the first half empty. If two
     // balanced halves both fit their respective page structures, prefer that
     // distribution; for very large documents the normal greedy loop below
@@ -2146,6 +2253,15 @@
         pageNo: chunks.length + 1,
         totalPages: 2,
       });
+      if (capacity === 0) {
+        return {
+          compact: compact,
+          chunks: [],
+          orientation: orientation,
+          overflowRowIndex: startIndex,
+          overflowKind: "row",
+        };
+      }
       var chunk = remaining.slice(0, capacity);
       chunks.push(chunk);
       remaining = remaining.slice(capacity);
@@ -2187,6 +2303,7 @@
 
   async function printInvoice() {
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    refreshLiveInvoiceNumber();
     recalcAll();
     var errors = validateInvoiceForOutput();
     if (errors.length) {
@@ -2255,6 +2372,17 @@
     }
 
     var plan = buildPrintPlan(rows, orientation);
+    if (plan.overflowRowIndex != null) {
+      var overflowMessage = plan.overflowKind === "final-page"
+        ? "بخش پایانی سند یا ردیف " + toPersianDigits(plan.overflowRowIndex + 1) + " در فضای چاپی A4 جا نمی‌گیرد. توضیحات پایانی یا شرح آن ردیف را کوتاه‌تر کنید."
+        : "ردیف " + toPersianDigits(plan.overflowRowIndex + 1) + " حتی به‌تنهایی در فضای چاپی A4 جا نمی‌گیرد. شرح این ردیف را کوتاه‌تر یا بین چند قلم تقسیم کنید.";
+      await showAppDialog({
+        title: "محتوای سند برای یک صفحه بیش از حد بلند است",
+        message: overflowMessage + " برنامه برای جلوگیری از بریده‌شدن متن، چاپ را متوقف کرد.",
+        actions: [{ id: "ok", label: "بازگشت و اصلاح", primary: true }],
+      });
+      return;
+    }
     if (plan.chunks.length > 1) {
       var confirmed = await showAppDialog({
         title: "چاپ چندصفحه‌ای",
@@ -2268,11 +2396,9 @@
     }
 
     renderPrintPlan(plan);
-    if (numberIsAutoSuggested) {
-      var data = collectInvoiceData();
-      commitInvoiceNumber(data.company.profile, data.meta.number);
-      numberIsAutoSuggested = false;
-    }
+    var data = collectInvoiceData();
+    commitInvoiceNumber(data.company.profile, data.meta.number);
+    numberIsAutoSuggested = false;
 
     var oldTitle = document.title;
     var dataForName = collectInvoiceData();
@@ -2461,20 +2587,26 @@
       if (!file) return;
       var profileKey = profileSelectEl.value;
       var profile = resolveProfile(profileKey);
-      var previousStamp = profile.stamp || "";
+      var adHocProfile = isCustomProfile(profileKey);
+      var previousStamp = adHocProfile ? adHocCompanyAssets.stamp : profile.stamp || "";
       stampUploadStatusEl.textContent = "در حال آماده‌سازی مهر…";
       try {
         var dataUrl = await resizeImageFile(file, 900);
-        profile.stamp = dataUrl;
-        if (profile.userCreated) persistUserProfiles();
-        else persistProfileAsset(profileKey, "stamp", dataUrl);
+        if (adHocProfile) {
+          adHocCompanyAssets.stamp = dataUrl;
+        } else {
+          profile.stamp = dataUrl;
+          if (profile.userCreated) persistUserProfiles();
+          else persistProfileAsset(profileKey, "stamp", dataUrl);
+        }
         stampRequested = false;
         setStampSrc(dataUrl);
         syncStampVisibility();
         isDirty = true;
         setStatus("مهر جدید برای «" + (profile.label || profile.name) + "» ثبت شد.");
       } catch (err) {
-        profile.stamp = previousStamp;
+        if (adHocProfile) adHocCompanyAssets.stamp = previousStamp;
+        else profile.stamp = previousStamp;
         setStampSrc(previousStamp);
         await showAppDialog({
           title: "افزودن مهر ناموفق بود",

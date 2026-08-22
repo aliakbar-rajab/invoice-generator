@@ -157,28 +157,28 @@
           <div class="inv-brand-text">
             <h1 id="inv-company-name" class="inv-company-name-display" dir="rtl">بنیان فولاد داریا</h1>
             <div class="inv-custom-company-name-wrap no-print" id="custom-company-name-wrap" hidden>
-              <input type="text" id="custom-company-name" class="inv-custom-company-name-input" dir="rtl" placeholder="نام شرکت را وارد کنید" autocomplete="organization" />
+              <input type="text" id="custom-company-name" class="inv-custom-company-name-input" dir="rtl" aria-label="نام شرکت صادرکننده" placeholder="نام شرکت را وارد کنید" autocomplete="organization" />
             </div>
           </div>
         </div>
         <dl class="inv-meta">
           <div>
             <dt>تاریخ</dt>
-            <dd><input type="text" class="inv-input" dir="ltr" data-field="meta.date" placeholder="۱۴۰۳/۰۱/۰۱" /></dd>
+            <dd><input type="text" class="inv-input" dir="ltr" data-field="meta.date" aria-label="تاریخ پیش‌فاکتور" placeholder="۱۴۰۳/۰۱/۰۱" /></dd>
           </div>
           <div>
             <dt>شماره پیش‌فاکتور</dt>
-            <dd><input type="text" class="inv-input" dir="ltr" data-field="meta.number" placeholder="—" /></dd>
+            <dd><input type="text" class="inv-input" dir="ltr" data-field="meta.number" aria-label="شماره پیش‌فاکتور" placeholder="—" /></dd>
           </div>
           <div class="inv-meta-validity">
             <dt>اعتبار پیش‌فاکتور</dt>
             <dd>
-              <select class="inv-input inv-meta-validity-select no-print" id="meta-validity-mode" title="نحوهٔ تعیین اعتبار پیش‌فاکتور را انتخاب کنید">
+              <select class="inv-input inv-meta-validity-select no-print" id="meta-validity-mode" aria-label="نحوهٔ تعیین اعتبار پیش‌فاکتور" title="نحوهٔ تعیین اعتبار پیش‌فاکتور را انتخاب کنید">
                 <option value="today" selected>پایان روز جاری</option>
                 <option value="tomorrow">فردا (محاسبهٔ خودکار)</option>
                 <option value="manual">تاریخ دلخواه</option>
               </select>
-              <input type="text" class="inv-input no-screen" dir="ltr" data-field="meta.validity" placeholder="۱۴۰۳/۰۱/۰۲" />
+              <input type="text" class="inv-input no-screen" dir="ltr" data-field="meta.validity" aria-label="تاریخ اعتبار پیش‌فاکتور" placeholder="۱۴۰۳/۰۱/۰۲" />
             </dd>
           </div>
         </dl>
@@ -190,23 +190,23 @@
           <div class="inv-card-grid">
             <div class="inv-field inv-field-wide">
               <span class="inv-field-label">نام شخص حقیقی / حقوقی</span>
-              <input type="text" class="inv-input inv-field-value inv-readonly" dir="rtl" data-field="seller.name" readonly />
+              <input type="text" class="inv-input inv-field-value inv-readonly" dir="rtl" data-field="seller.name" aria-label="نام فروشنده" readonly />
             </div>
             <div class="inv-field inv-field-wide">
               <span class="inv-field-label">نشانی</span>
-              <textarea class="inv-input inv-field-value inv-readonly inv-autogrow" dir="rtl" data-field="seller.address" rows="1" readonly></textarea>
+              <textarea class="inv-input inv-field-value inv-readonly inv-autogrow" dir="rtl" data-field="seller.address" aria-label="نشانی فروشنده" rows="1" readonly></textarea>
             </div>
             <div class="inv-field">
               <span class="inv-field-label">شناسه ملی</span>
-              <input type="text" class="inv-input inv-field-value inv-readonly" dir="ltr" data-field="seller.nationalId" readonly />
+              <input type="text" class="inv-input inv-field-value inv-readonly" dir="ltr" data-field="seller.nationalId" aria-label="شناسه ملی فروشنده" readonly />
             </div>
             <div class="inv-field">
               <span class="inv-field-label">کد پستی</span>
-              <input type="text" class="inv-input inv-field-value inv-readonly" dir="ltr" data-field="seller.postalCode" readonly />
+              <input type="text" class="inv-input inv-field-value inv-readonly" dir="ltr" data-field="seller.postalCode" aria-label="کد پستی فروشنده" readonly />
             </div>
             <div class="inv-field inv-field-wide">
               <span class="inv-field-label">تلفن</span>
-              <textarea class="inv-input inv-field-value inv-readonly inv-autogrow" dir="ltr" data-field="seller.phone" rows="1" readonly></textarea>
+              <textarea class="inv-input inv-field-value inv-readonly inv-autogrow" dir="ltr" data-field="seller.phone" aria-label="تلفن فروشنده" rows="1" readonly></textarea>
             </div>
           </div>
         </div>
@@ -216,23 +216,23 @@
           <div class="inv-card-grid">
             <div class="inv-field inv-field-wide">
               <span class="inv-field-label">نام شخص حقیقی / حقوقی</span>
-              <input type="text" class="inv-input inv-field-value" dir="rtl" data-field="buyer.name" placeholder="—" />
+              <input type="text" class="inv-input inv-field-value" dir="rtl" data-field="buyer.name" aria-label="نام خریدار" placeholder="—" />
             </div>
             <div class="inv-field inv-field-wide">
               <span class="inv-field-label">نشانی</span>
-              <textarea class="inv-input inv-field-value inv-autogrow" dir="rtl" data-field="buyer.address" rows="1" placeholder="نشانی کامل خریدار"></textarea>
+              <textarea class="inv-input inv-field-value inv-autogrow" dir="rtl" data-field="buyer.address" aria-label="نشانی خریدار" rows="1" placeholder="نشانی کامل خریدار"></textarea>
             </div>
             <div class="inv-field">
               <span class="inv-field-label">شناسه ملی</span>
-              <input type="text" class="inv-input inv-field-value" dir="ltr" data-field="buyer.nationalId" placeholder="—" />
+              <input type="text" class="inv-input inv-field-value" dir="ltr" data-field="buyer.nationalId" aria-label="شناسه ملی خریدار" placeholder="—" />
             </div>
             <div class="inv-field">
               <span class="inv-field-label">کد پستی</span>
-              <input type="text" class="inv-input inv-field-value" dir="ltr" data-field="buyer.postalCode" placeholder="—" />
+              <input type="text" class="inv-input inv-field-value" dir="ltr" data-field="buyer.postalCode" aria-label="کد پستی خریدار" placeholder="—" />
             </div>
             <div class="inv-field inv-field-wide">
               <span class="inv-field-label">تلفن</span>
-              <textarea class="inv-input inv-field-value inv-autogrow" dir="ltr" data-field="buyer.phone" rows="1" placeholder="—"></textarea>
+              <textarea class="inv-input inv-field-value inv-autogrow" dir="ltr" data-field="buyer.phone" aria-label="تلفن خریدار" rows="1" placeholder="—"></textarea>
             </div>
           </div>
         </div>
@@ -297,7 +297,7 @@
           <div class="inv-tax-row">
             <span>
               مالیات و عوارض
-<span class="inv-tax-percent-wrap">(<input type="text" inputmode="decimal" class="inv-input inv-tax-percent" data-field="taxPercent" value="۱۰" />٪)</span>
+<span class="inv-tax-percent-wrap">(<input type="text" inputmode="decimal" class="inv-input inv-tax-percent" data-field="taxPercent" aria-label="درصد مالیات و عوارض" value="۱۰" />٪)</span>
             </span>
             <strong data-total="taxTotal">۰ ریال</strong>
           </div>
@@ -312,7 +312,7 @@
         </section>
         <div class="inv-notes">
           <span class="inv-notes-label">توضیحات</span>
-          <textarea class="inv-input inv-textarea" dir="rtl" data-field="notes" rows="1" placeholder=""></textarea>
+          <textarea class="inv-input inv-textarea" dir="rtl" data-field="notes" aria-label="توضیحات پیش‌فاکتور" rows="1" placeholder=""></textarea>
         </div>
 
         <div class="inv-signature-block inv-signature-buyer">
@@ -410,14 +410,14 @@
 
 <template id="row-template">
   <tr>
-    <td class="no-print"><button type="button" class="row-delete" tabindex="-1" title="حذف ردیف">✕</button></td>
+    <td class="no-print"><button type="button" class="row-delete" aria-label="حذف ردیف" title="حذف ردیف">✕</button></td>
     <td class="row-index"><span class="row-index-badge"></span></td>
-    <td><textarea rows="1" class="cell-input cell-textarea" data-row-field="description"></textarea></td>
-    <td><input type="text" inputmode="decimal" class="cell-input cell-input-num" data-row-field="quantity" /></td>
-    <td><input type="text" class="cell-input" data-row-field="unit" /></td>
-    <td><input type="text" inputmode="decimal" class="cell-input cell-input-num" data-row-field="unitPrice" /></td>
+    <td><textarea rows="1" class="cell-input cell-textarea" data-row-field="description" aria-label="شرح کالا یا خدمت"></textarea></td>
+    <td><input type="text" inputmode="decimal" class="cell-input cell-input-num" data-row-field="quantity" aria-label="تعداد یا مقدار" /></td>
+    <td><input type="text" class="cell-input" data-row-field="unit" aria-label="واحد" /></td>
+    <td><input type="text" inputmode="decimal" class="cell-input cell-input-num" data-row-field="unitPrice" aria-label="مبلغ واحد" /></td>
     <td class="cell-computed" data-row-computed="total">۰</td>
-    <td><input type="text" inputmode="decimal" class="cell-input cell-input-num" data-row-field="discount" /></td>
+    <td><input type="text" inputmode="decimal" class="cell-input cell-input-num" data-row-field="discount" aria-label="تخفیف" /></td>
     <td class="cell-computed" data-row-computed="afterDiscount">۰</td>
   </tr>
 </template>
