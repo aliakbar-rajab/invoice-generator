@@ -21,6 +21,7 @@
   var SAVED_LIST_KEY = "preinvoice.saved.v1";
   var CUSTOM_PROFILES_KEY = "preinvoice.companyProfiles.v1";
   var PROFILE_ASSETS_KEY = "preinvoice.profileAssets.v1";
+  var PROFILE_OVERRIDES_KEY = "preinvoice.profileOverrides.v1";
 
   // In-memory id of the saved-list entry currently loaded (null = unsaved/
   // new document). Save updates this entry in place once set; it is reset
@@ -29,10 +30,12 @@
   var currentSavedName = "";
   var isDirty = false;
   var validationRequested = false;
-  var stampRequested = false;
+  var stampRequested = true;
   var stampAvailable = false;
   var lastProfileKey = null;
   var pendingCompanyLogoData = "";
+  var companyEditorMode = "create";
+  var companyEditorProfileKey = null;
   // The catch-all «سایر» profile is document-scoped rather than a reusable
   // company identity. Keep its branding outside COMPANY_PROFILES so opening
   // one ad-hoc invoice can never leak its logo or stamp into the next one.
@@ -139,8 +142,6 @@
   var stampEl = document.getElementById("inv-stamp");
   var stampAreaEl = stampEl.parentElement;
   var profileSelectEl = document.getElementById("company-profile");
-  var customCompanyNameWrapEl = document.getElementById("custom-company-name-wrap");
-  var customCompanyNameEl = document.getElementById("custom-company-name");
   var validityModeEl = document.getElementById("meta-validity-mode");
   var fontSelectEl = document.getElementById("font-select");
   var fontSizeSelectEl = document.getElementById("font-size-select");
@@ -173,6 +174,9 @@
   var dialogActionsEl = document.getElementById("app-dialog-actions");
   var companyEditorDialogEl = document.getElementById("company-editor-dialog");
   var companyEditorFormEl = document.getElementById("company-editor-form");
+  var companyEditorTitleEl = document.getElementById("company-editor-title");
+  var companyEditorDescriptionEl = document.getElementById("company-editor-description");
+  var companyEditorSubmitEl = document.getElementById("btn-company-editor-submit");
   var companyEditorNameEl = document.getElementById("company-editor-name");
   var companyEditorNationalIdEl = document.getElementById("company-editor-national-id");
   var companyEditorPostalCodeEl = document.getElementById("company-editor-postal-code");
@@ -190,7 +194,6 @@
   // broken-image icon.
   stampEl.addEventListener("error", function () {
     stampAvailable = false;
-    stampRequested = false;
     stampEl.hidden = true;
     stampAreaEl.classList.remove("has-stamp");
     sheet.classList.remove("stamp-enabled");
@@ -339,6 +342,26 @@
     localStorage.setItem(PROFILE_ASSETS_KEY, JSON.stringify(overrides));
   }
 
+  function persistProfileDetails(profileKey) {
+    var profile = COMPANY_PROFILES[profileKey];
+    if (!profile || isCustomProfile(profileKey)) return;
+    if (profile.userCreated) {
+      persistUserProfiles();
+      return;
+    }
+    var overrides = readStoredObject(PROFILE_OVERRIDES_KEY);
+    overrides[profileKey] = {
+      label: profile.label,
+      name: profile.name,
+      nationalId: profile.nationalId,
+      address: profile.address,
+      postalCode: profile.postalCode,
+      phones: profile.phones,
+      website: profile.website,
+    };
+    localStorage.setItem(PROFILE_OVERRIDES_KEY, JSON.stringify(overrides));
+  }
+
   function renderCompanyProfileOptions(selectedKey) {
     var userKeys = Object.keys(COMPANY_PROFILES)
       .filter(function (key) { return COMPANY_PROFILES[key] && COMPANY_PROFILES[key].userCreated; })
@@ -364,6 +387,15 @@
       if (!/^company-[a-z0-9-]+$/i.test(key)) return;
       var profile = profileFromCompanyData(storedProfiles[key], true);
       if (profile.name) COMPANY_PROFILES[key] = profile;
+    });
+
+    var profileOverrides = readStoredObject(PROFILE_OVERRIDES_KEY);
+    Object.keys(profileOverrides).forEach(function (key) {
+      if (!COMPANY_PROFILES[key] || COMPANY_PROFILES[key].userCreated) return;
+      var override = profileOverrides[key] || {};
+      ["label", "name", "nationalId", "address", "postalCode", "phones", "website"].forEach(function (field) {
+        if (override[field] != null) COMPANY_PROFILES[key][field] = String(override[field]);
+      });
     });
 
     var assetOverrides = readStoredObject(PROFILE_ASSETS_KEY);
@@ -506,22 +538,6 @@
     adHocCompanyAssets = { logo: "", stamp: "" };
   }
 
-  function setCustomCompanyMode(profileKey, companyName) {
-    var custom = isCustomProfile(profileKey);
-    customCompanyNameWrapEl.hidden = !custom;
-    customCompanyNameEl.value = custom ? companyName || "" : "";
-
-    document.querySelectorAll('[data-field^="seller."]').forEach(function (field) {
-      field.readOnly = !custom;
-      field.classList.toggle("inv-readonly", !custom);
-    });
-    var website = document.querySelector('[data-field="company.website"]');
-    if (website) {
-      website.readOnly = false;
-      website.classList.remove("inv-readonly");
-    }
-  }
-
   var SEQ_KEY_PREFIX = "pishFaktor.dailySeq.";
 
   // Number suggestions are deliberately side-effect free. Merely opening the
@@ -598,7 +614,7 @@
       company: companyFromProfile(profileKey, profile),
       taxPercent: "۱۰",
       notes: "",
-      includeStamp: false,
+      includeStamp: true,
       // Keep the familiar eight-row form visible. Unused rows are not saved,
       // but they remain on the editor and printed A4 as empty ruled rows.
       items: makeBlankRows(MIN_INVOICE_ROWS),
@@ -627,7 +643,6 @@
       : profile;
 
     document.getElementById("inv-company-name").textContent = profile.name;
-    setCustomCompanyMode(key, profile.name);
     // company.address / company.phones no longer have an input of their own:
     // the footer band is website-only now, and the seller card is where those
     // two are shown and edited. setField tolerates the missing element so the
@@ -684,13 +699,6 @@
       includeStampEl.checked = !!stampRequested;
       includeStampEl.disabled = !stampAvailable;
     }
-  }
-
-  function invalidateFinalization() {
-    if (!stampRequested) return false;
-    stampRequested = false;
-    syncStampVisibility();
-    return true;
   }
 
   function setStampSrc(src) {
@@ -809,27 +817,46 @@
     companyLogoFileEl.value = "";
   }
 
-  function openCompanyEditor() {
-    var adHoc = isCustomProfile(profileSelectEl.value);
-    companyEditorFormEl.reset();
-    companyEditorErrorEl.hidden = true;
-    if (adHoc) {
-      companyEditorNameEl.value = customCompanyNameEl.value.trim();
-      companyEditorNationalIdEl.value = document.querySelector('[data-field="seller.nationalId"]').value;
-      companyEditorPostalCodeEl.value = document.querySelector('[data-field="seller.postalCode"]').value;
-      companyEditorAddressEl.value = document.querySelector('[data-field="seller.address"]').value;
-      companyEditorPhonesEl.value = document.querySelector('[data-field="seller.phone"]').value;
-      companyEditorWebsiteEl.value = document.querySelector('[data-field="company.website"]').value;
-      setCompanyLogoPreview(adHocCompanyAssets.logo, "لوگوی فعلی این سند");
-    } else {
-      setCompanyLogoPreview("", "");
-    }
-    closeSettingsPanel();
-    companyEditorDialogEl.hidden = false;
-    window.setTimeout(function () { companyEditorNameEl.focus(); }, 0);
+  function setCompanyEditorFieldValue(field, value) {
+    var nextValue = value == null ? "" : String(value);
+    field.defaultValue = nextValue;
+    field.value = nextValue;
   }
 
-  function createCompanyProfileFromEditor() {
+  function openCompanyEditor(mode) {
+    var selectedKey = profileSelectEl.value;
+    var editingExisting = mode === "edit" && !isCustomProfile(selectedKey);
+    var adHoc = isCustomProfile(selectedKey);
+    var profile = resolveProfile(selectedKey);
+    companyEditorMode = editingExisting ? "edit" : "create";
+    companyEditorProfileKey = editingExisting ? selectedKey : null;
+    companyEditorFormEl.reset();
+    companyEditorErrorEl.hidden = true;
+    if (editingExisting || adHoc) {
+      setCompanyEditorFieldValue(companyEditorNameEl, document.getElementById("inv-company-name").textContent.trim());
+      setCompanyEditorFieldValue(companyEditorNationalIdEl, document.querySelector('[data-field="seller.nationalId"]').value);
+      setCompanyEditorFieldValue(companyEditorPostalCodeEl, document.querySelector('[data-field="seller.postalCode"]').value);
+      setCompanyEditorFieldValue(companyEditorAddressEl, document.querySelector('[data-field="seller.address"]').value);
+      setCompanyEditorFieldValue(companyEditorPhonesEl, document.querySelector('[data-field="seller.phone"]').value);
+      setCompanyEditorFieldValue(companyEditorWebsiteEl, document.querySelector('[data-field="company.website"]').value);
+      var currentLogo = adHoc ? adHocCompanyAssets.logo : profile.logo;
+      setCompanyLogoPreview(currentLogo, currentLogo ? "لوگوی فعلی شرکت" : "");
+    } else {
+      [companyEditorNameEl, companyEditorNationalIdEl, companyEditorPostalCodeEl,
+        companyEditorAddressEl, companyEditorPhonesEl, companyEditorWebsiteEl]
+        .forEach(function (field) { setCompanyEditorFieldValue(field, ""); });
+      setCompanyLogoPreview("", "");
+    }
+    companyEditorTitleEl.textContent = editingExisting ? "ویرایش شرکت فعلی" : "ثبت شرکت جدید";
+    companyEditorDescriptionEl.textContent = editingExisting
+      ? "تغییرات به‌عنوان مشخصات پایهٔ این شرکت در همین مرورگر ذخیره می‌شود و برای سندهای جدید هم در دسترس است."
+      : "اطلاعات این شرکت روی همین مرورگر ذخیره و به فهرست «شرکت صادرکننده» اضافه می‌شود.";
+    companyEditorSubmitEl.textContent = editingExisting ? "ذخیرهٔ تغییرات شرکت" : "ثبت و انتخاب شرکت";
+    closeSettingsPanel();
+    companyEditorDialogEl.hidden = false;
+  }
+
+  function saveCompanyProfileFromEditor() {
     var name = companyEditorNameEl.value.trim();
     if (!name) {
       companyEditorErrorEl.textContent = "نام شرکت را وارد کنید.";
@@ -838,23 +865,31 @@
       return false;
     }
 
-    var profileKey = "company-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6);
+    var editingExisting = companyEditorMode === "edit" && COMPANY_PROFILES[companyEditorProfileKey];
+    var profileKey = editingExisting
+      ? companyEditorProfileKey
+      : "company-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6);
+    var previousProfile = editingExisting ? Object.assign({}, COMPANY_PROFILES[profileKey]) : null;
     var profile = profileFromCompanyData({
       name: name,
       logo: pendingCompanyLogoData,
-      stamp: "",
+      stamp: editingExisting ? previousProfile.stamp : "",
       nationalId: toPersianDigits(companyEditorNationalIdEl.value.trim()),
       address: companyEditorAddressEl.value.trim(),
       postalCode: toPersianDigits(companyEditorPostalCodeEl.value.trim()),
       phones: toPersianDigits(companyEditorPhonesEl.value.trim()),
       website: companyEditorWebsiteEl.value.trim(),
-    }, true);
+    }, editingExisting ? !!previousProfile.userCreated : true);
 
     COMPANY_PROFILES[profileKey] = profile;
     try {
-      persistUserProfiles();
+      persistProfileDetails(profileKey);
+      if (editingExisting && !profile.userCreated && pendingCompanyLogoData !== previousProfile.logo) {
+        persistProfileAsset(profileKey, "logo", pendingCompanyLogoData);
+      }
     } catch (err) {
-      delete COMPANY_PROFILES[profileKey];
+      if (previousProfile) COMPANY_PROFILES[profileKey] = previousProfile;
+      else delete COMPANY_PROFILES[profileKey];
       companyEditorErrorEl.textContent = "فضای ذخیرهٔ مرورگر کافی نیست؛ تصویر کوچک‌تری انتخاب کنید.";
       companyEditorErrorEl.hidden = false;
       return false;
@@ -862,14 +897,16 @@
 
     renderCompanyProfileOptions(profileKey);
     applyCompanyProfile(profileKey);
-    stampRequested = false;
+    stampRequested = true;
     syncStampVisibility();
     if (numberIsAutoSuggested) {
       var numberInput = document.querySelector('[data-field="meta.number"]');
       if (numberInput) numberInput.value = suggestInvoiceNumber(profileKey);
     }
     isDirty = true;
-    setStatus("شرکت «" + profile.label + "» ثبت و انتخاب شد.");
+    setStatus(editingExisting
+      ? "مشخصات پایهٔ شرکت «" + profile.label + "» به‌روزرسانی شد."
+      : "شرکت «" + profile.label + "» ثبت و انتخاب شد.");
     closeCompanyEditor();
     return true;
   }
@@ -1199,7 +1236,6 @@
       }
       ensureMinimumRows();
       recalcAll();
-      invalidateFinalization();
       isDirty = true;
       setStatus("قلم حذف شد؛ تغییرات ذخیره‌نشده");
     });
@@ -1218,7 +1254,6 @@
 
   function addRow() {
     createRow({}, { focusField: "description" });
-    invalidateFinalization();
     isDirty = true;
     setStatus("تغییرات ذخیره‌نشده");
   }
@@ -1566,24 +1601,22 @@
       setPath(data, el.getAttribute("data-field"), value);
     });
 
-    // Named profiles stay authoritative. «سایر» is intentionally editable,
-    // so its typed company/seller details are preserved in saved files.
+    // A profile supplies defaults, never a lock. Preserve every company and
+    // seller edit in this document, regardless of which profile it started
+    // from, while still embedding the active branding assets for portability.
     var profileKey = COMPANY_PROFILES[profileSelectEl.value] ? profileSelectEl.value : DEFAULT_PROFILE_KEY;
     var profile = resolveProfile(profileKey);
-    var enteredWebsite = data.company.website || "";
+    var enteredCompany = Object.assign({}, data.company);
+    data.company = Object.assign({}, companyFromProfile(profileKey, profile), enteredCompany, {
+      profile: profileKey,
+      nationalId: data.seller.nationalId || "",
+      address: data.seller.address || "",
+      postalCode: data.seller.postalCode || "",
+      phones: data.seller.phone || "",
+    });
     if (isCustomProfile(profileKey)) {
-      data.company = companyFromProfile(profileKey, profile);
-      data.company.name = customCompanyNameEl.value.trim() || data.seller.name || "";
-      data.company.nationalId = data.seller.nationalId || "";
-      data.company.address = data.seller.address || "";
-      data.company.phones = data.seller.phone || "";
-      data.company.website = enteredWebsite;
       data.company.logo = adHocCompanyAssets.logo;
       data.company.stamp = adHocCompanyAssets.stamp;
-    } else {
-      data.company = companyFromProfile(profileKey, profile);
-      data.company.website = enteredWebsite;
-      data.seller = sellerFromProfile(profile);
     }
     // meta.validityMode isn't a [data-field] (same as company.profile above)
     // since it's a mode picker, not editable document text.
@@ -1628,21 +1661,13 @@
     // it with Foulad Bonyan's value.
     var profileDefaults = companyFromProfile(profileKey, profile);
     var customProfile = isCustomProfile(profileKey);
-    var customSellerDefaults = { name: "", nationalId: "", address: "", postalCode: "", phone: "" };
-    var companyData = customProfile
-      ? Object.assign({}, profileDefaults, raw && raw.company, { profile: CUSTOM_PROFILE_KEY })
-      : Object.assign({}, profileDefaults, {
-          website: raw && raw.company && raw.company.website != null
-            ? raw.company.website
-            : profileDefaults.website,
-        });
-    var sellerData = customProfile
-      ? Object.assign({}, customSellerDefaults, raw && raw.seller)
+    var sellerDefaults = customProfile
+      ? { name: "", nationalId: "", address: "", postalCode: "", phone: "" }
       : sellerFromProfile(profile);
-    if (customProfile) {
-      if (!companyData.name) companyData.name = sellerData.name || "";
-      if (!sellerData.name) sellerData.name = companyData.name || "";
-    }
+    var companyData = Object.assign({}, profileDefaults, raw && raw.company, { profile: profileKey });
+    var sellerData = Object.assign({}, sellerDefaults, raw && raw.seller);
+    if (!companyData.name) companyData.name = sellerData.name || "";
+    if (!sellerData.name) sellerData.name = companyData.name || "";
     var data = {
       orientation: (raw && raw.orientation) || defaults.orientation,
       headerGray: raw && raw.headerGray != null ? !!raw.headerGray : defaults.headerGray,
@@ -1654,7 +1679,7 @@
       company: companyData,
       taxPercent: raw && raw.taxPercent != null ? raw.taxPercent : defaults.taxPercent,
       notes: raw && raw.notes != null ? raw.notes : defaults.notes,
-      includeStamp: !!(raw && raw.includeStamp),
+      includeStamp: raw && raw.includeStamp != null ? !!raw.includeStamp : defaults.includeStamp,
       items: raw && raw.items && raw.items.length ? raw.items.filter(function (row) {
         return ROW_FIELDS.some(function (field) { return row && String(row[field] || "").trim(); });
       }) : defaults.items,
@@ -1679,7 +1704,6 @@
     syncValidityFieldVisibility(validityModeEl.value);
 
     document.getElementById("inv-company-name").textContent = data.company.name || "";
-    setCustomCompanyMode(profileKey, data.company.name);
     if (customProfile) {
       adHocCompanyAssets = {
         logo: String(data.company.logo || ""),
@@ -2393,7 +2417,7 @@
       currentSavedName = "";
       isDirty = false;
       numberIsAutoSuggested = true;
-      stampRequested = false;
+      stampRequested = true;
       syncStampVisibility();
       setStatus("سند جدید آماده است.");
       renderSavedList();
@@ -2408,19 +2432,6 @@
       var file = e.target.files && e.target.files[0];
       if (file) openFromFile(file);
       e.target.value = "";
-    });
-
-    customCompanyNameEl.addEventListener("input", function () {
-      if (!isCustomProfile(profileSelectEl.value)) return;
-      livePersianizeDigits(this);
-      var name = this.value.trim();
-      document.getElementById("inv-company-name").textContent = name;
-      var sellerName = document.querySelector('[data-field="seller.name"]');
-      if (sellerName) sellerName.value = name;
-      invalidateFinalization();
-      fitStaticFields();
-      isDirty = true;
-      setStatus("تغییرات ذخیره‌نشده");
     });
 
     profileSelectEl.addEventListener("change", async function () {
@@ -2438,7 +2449,7 @@
         this.value = nextKey;
       }
       applyCompanyProfile(nextKey);
-      stampRequested = false;
+      stampRequested = true;
       syncStampVisibility();
       if (numberIsAutoSuggested) {
         var numberInput = document.querySelector('[data-field="meta.number"]');
@@ -2446,7 +2457,7 @@
       }
       isDirty = true;
       setStatus(isCustomProfile(nextKey) ? "نام و مشخصات شرکت را وارد کنید." : "شرکت صادرکننده تغییر کرد؛ سند دوباره نیاز به تأیید دارد.");
-      if (isCustomProfile(nextKey)) customCompanyNameEl.focus();
+      if (isCustomProfile(nextKey)) document.getElementById("inv-company-name").focus();
     });
 
     validityModeEl.addEventListener("change", function () {
@@ -2454,7 +2465,6 @@
       if (input) input.value = resolveValidityValue(this.value);
       syncValidityFieldVisibility(this.value);
       if (this.value === "manual" && input) input.focus();
-      invalidateFinalization();
       isDirty = true;
       setStatus("تغییرات ذخیره‌نشده");
     });
@@ -2487,19 +2497,23 @@
 
     headerGrayToggleEl.addEventListener("change", function () {
       applyHeaderGray(this.checked);
-      invalidateFinalization();
       isDirty = true;
-      setStatus(this.checked ? "پس‌زمینهٔ خاکستری هدر فعال شد." : "پس‌زمینهٔ هدر خاموش شد.");
+      setStatus(this.checked ? "پس‌زمینهٔ خاکستری هدر و فوتر فعال شد." : "پس‌زمینهٔ هدر و فوتر خاموش شد.");
     });
 
-    document.getElementById("btn-company-editor").addEventListener("click", openCompanyEditor);
+    document.getElementById("btn-company-profile-edit").addEventListener("click", function () {
+      openCompanyEditor("edit");
+    });
+    document.getElementById("btn-company-editor").addEventListener("click", function () {
+      openCompanyEditor("create");
+    });
     document.getElementById("btn-company-editor-cancel").addEventListener("click", closeCompanyEditor);
     companyEditorDialogEl.addEventListener("click", function (e) {
       if (e.target === companyEditorDialogEl) closeCompanyEditor();
     });
     companyEditorFormEl.addEventListener("submit", function (e) {
       e.preventDefault();
-      createCompanyProfileFromEditor();
+      saveCompanyProfileFromEditor();
     });
     document.getElementById("btn-company-logo").addEventListener("click", function () {
       companyLogoFileEl.click();
@@ -2541,7 +2555,7 @@
           if (profile.userCreated) persistUserProfiles();
           else persistProfileAsset(profileKey, "stamp", dataUrl);
         }
-        stampRequested = false;
+        stampRequested = true;
         setStampSrc(dataUrl);
         syncStampVisibility();
         isDirty = true;
@@ -2558,23 +2572,11 @@
       }
     });
 
-    includeStampEl.addEventListener("change", async function () {
-      if (!this.checked) {
-        stampRequested = false;
-        syncStampVisibility();
-        isDirty = true;
-        setStatus("مهر از نسخهٔ چاپی حذف شد.");
-        return;
-      }
-      validateInvoiceForOutput();
-      var confirmed = await confirmApp("درج مهر شرکت", "این گزینه سند را به‌عنوان نسخهٔ نهایی علامت می‌زند و مهر شرکت انتخاب‌شده را در چاپ قرار می‌دهد.", "تأیید و درج مهر");
-      stampRequested = confirmed;
-      this.checked = confirmed;
+    includeStampEl.addEventListener("change", function () {
+      stampRequested = this.checked;
       syncStampVisibility();
-      if (confirmed) {
-        isDirty = true;
-        setStatus("نسخهٔ نهایی با مهر شرکت آماده شد.");
-      }
+      isDirty = true;
+      setStatus(stampRequested ? "مهر فروشنده در پیش‌فاکتور نمایش داده می‌شود." : "مهر از پیش‌فاکتور حذف شد.");
     });
 
     document.addEventListener("click", function () {
@@ -2675,7 +2677,7 @@
     currentSavedId = null;
     currentSavedName = "";
     numberIsAutoSuggested = true;
-    stampRequested = false;
+    stampRequested = true;
     syncStampVisibility();
     setStatus("آماده برای ثبت پیش‌فاکتور جدید.");
     renderSavedList();
@@ -2684,10 +2686,9 @@
     // Wired after the initial load so programmatic value-setting above
     // doesn't immediately mark the fresh document as having unsaved changes.
     sheet.addEventListener("input", function () {
-      var stampWasRemoved = invalidateFinalization();
       isDirty = true;
       if (validationRequested) validateInvoiceForOutput();
-      setStatus(stampWasRemoved ? "سند تغییر کرد؛ مهر نهایی برداشته شد." : "تغییرات ذخیره‌نشده");
+      setStatus("تغییرات ذخیره‌نشده");
     });
   }
 

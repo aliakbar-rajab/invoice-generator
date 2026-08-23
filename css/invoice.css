@@ -335,7 +335,8 @@ body {
   break-inside: avoid;
 }
 
-.invoice-sheet.header-gray .inv-head {
+.invoice-sheet.header-gray .inv-head,
+.invoice-sheet.header-gray .inv-footer {
   background: #f2f2f2;
 }
 
@@ -430,35 +431,6 @@ body {
   font-weight: 800;
   color: var(--band-ink);
   letter-spacing: 0.01em;
-}
-
-.inv-custom-company-name-wrap[hidden] {
-  display: none !important;
-}
-
-.inv-custom-company-name-input {
-  width: 55mm;
-  max-width: 100%;
-  padding: 1.2mm 2mm;
-  border: 1px solid var(--ink);
-  border-radius: 1mm;
-  outline: none;
-  background: #fff;
-  color: var(--ink);
-  font: inherit;
-  font-size: calc(10pt * var(--doc-font-scale));
-  font-weight: 700;
-  text-align: center;
-}
-
-.inv-custom-company-name-input:focus {
-  box-shadow: 0 0 0 0.5mm rgb(0 0 0 / 12%);
-}
-
-@media screen {
-  .invoice-sheet[data-company="other"] .inv-company-name-display {
-    display: none;
-  }
 }
 
 .orientation-portrait .inv-brand-text h1 {

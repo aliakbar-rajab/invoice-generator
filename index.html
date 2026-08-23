@@ -43,32 +43,6 @@
         </div>
       </div>
 
-      <nav class="toolbar-actions" aria-label="عملیات اصلی سند">
-        <button type="button" id="btn-new" class="toolbar-btn" title="شروع یک پیش‌فاکتور جدید">
-          <svg><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13 3v6h6"/><line x1="12" y1="12.5" x2="12" y2="17.5"/><line x1="9.5" y1="15" x2="14.5" y2="15"/></svg>
-          <span>جدید</span>
-        </button>
-        <button type="button" id="btn-save" class="toolbar-btn" title="ذخیره در همین مرورگر (Ctrl+S)">
-          <svg><path d="M4.5 4h12l3 3v13h-15z"/><path d="M7.5 4v5h7V4"/><rect x="7.5" y="13" width="7" height="6"/></svg>
-          <span>ذخیره</span>
-        </button>
-        <div class="toolbar-saved">
-          <button type="button" id="btn-saved-list" class="toolbar-btn" title="فهرست پیش‌فاکتورهای ذخیره‌شده" aria-expanded="false">
-            <svg><path d="M6.5 3.5h11v17l-5.5-3.7-5.5 3.7z"/></svg>
-            <span>ذخیره‌شده‌ها <b class="toolbar-count" id="saved-count">۰</b></span>
-          </button>
-          <div class="saved-panel no-print" id="saved-panel" hidden>
-            <div class="saved-panel-header">
-              <strong>پیش‌فاکتورهای ذخیره‌شده</strong>
-              <button type="button" id="btn-saved-close" class="saved-panel-close" title="بستن">✕</button>
-            </div>
-            <p class="saved-panel-hint">نسخه‌های این فهرست روی همین مرورگر نگهداری می‌شوند. برای پشتیبان دائمی، از «پشتیبان فایل» استفاده کنید.</p>
-            <ul class="saved-list" id="saved-list"></ul>
-            <p class="saved-panel-empty" id="saved-empty">هنوز چیزی ذخیره نشده است.</p>
-          </div>
-        </div>
-      </nav>
-
       <div class="toolbar-live-total" aria-label="مبلغ قابل پرداخت جاری">
         <span>قابل پرداخت</span>
         <strong id="toolbar-payable-total">—</strong>
@@ -77,30 +51,14 @@
       <div class="toolbar-spacer"></div>
 
       <div class="toolbar-settings-wrap">
-        <button type="button" id="btn-settings" class="toolbar-btn toolbar-settings-btn" aria-expanded="false" title="تنظیمات چاپ و فایل">
+        <button type="button" id="btn-settings" class="toolbar-btn toolbar-settings-btn" aria-expanded="false" title="مدیریت شرکت، لوگو و فایل مهر">
           <svg><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V20.3h-3v-.08a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7 15a1.7 1.7 0 0 0-1.56-1.03H5.3v-3h.14A1.7 1.7 0 0 0 7 9.94a1.7 1.7 0 0 0-.34-1.88L6.6 8l2.12-2.12.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 11.7 4.7V4.6h3v.1a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06L19.8 8l-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.03h.14v3h-.14A1.7 1.7 0 0 0 19.4 15z"/></svg>
           <span>تنظیمات</span>
         </button>
         <div class="toolbar-settings-panel" id="settings-panel" hidden>
-          <div class="settings-section">
-            <strong>جهت چاپ</strong>
-            <div class="orientation-switch" role="radiogroup" aria-label="جهت صفحه">
-              <label class="orientation-btn">
-                <input type="radio" name="orientation" value="landscape" id="orientation-landscape" checked />
-                <svg><rect x="2.5" y="6.5" width="19" height="11" rx="2"/></svg><span>افقی</span>
-              </label>
-              <label class="orientation-btn">
-                <input type="radio" name="orientation" value="portrait" id="orientation-portrait" />
-                <svg><rect x="6.5" y="2.5" width="11" height="19" rx="2"/></svg><span>عمودی</span>
-              </label>
-            </div>
-          </div>
-          <label class="settings-toggle-control">
-            <input type="checkbox" id="header-gray-toggle" checked />
-            <span><strong>پس‌زمینهٔ خاکستری هدر</strong><small>خاکستری بسیار روشن؛ در پیش‌نمایش و چاپ قابل خاموش‌کردن است.</small></span>
-          </label>
           <div class="settings-section settings-company-tools">
-            <span class="settings-section-copy"><strong>شرکت‌های صادرکننده</strong><small>مشخصات و لوگوی شرکت جدید را ثبت و به فهرست بالا اضافه کنید.</small></span>
+            <span class="settings-section-copy"><strong>شرکت‌های صادرکننده</strong><small>مشخصات و لوگوی شرکت فعلی را اصلاح کنید یا شرکت تازه‌ای بسازید.</small></span>
+            <button type="button" id="btn-company-profile-edit" class="settings-action">ویرایش شرکت فعلی</button>
             <button type="button" id="btn-company-editor" class="settings-action">ثبت شرکت جدید</button>
           </div>
           <div class="settings-section settings-stamp-tools">
@@ -115,16 +73,6 @@
           <div class="settings-section settings-template-info">
             <strong>قالب سازمانی</strong>
             <span>وزیرمتن · اندازهٔ ثابت و استاندارد چاپ</span>
-          </div>
-          <label class="stamp-finalize-control">
-            <input type="checkbox" id="include-stamp" />
-            <span><strong>نسخهٔ نهایی با مهر شرکت</strong><small>در صورت فعال‌سازی، مهر شرکت در نسخهٔ چاپی قرار می‌گیرد.</small></span>
-          </label>
-          <div class="settings-file-actions">
-            <button type="button" id="btn-open" class="settings-action"><span>باز کردن فایل</span></button>
-            <input type="file" id="file-open" accept="application/json,.json,.pfi" hidden />
-            <button type="button" id="btn-save-as" class="settings-action"><span>ذخیره با نام جدید</span></button>
-            <button type="button" id="btn-export" class="settings-action"><span>پشتیبان فایل</span></button>
           </div>
         </div>
       </div>
@@ -141,6 +89,69 @@
       <span id="zoom-value" hidden>۱۰۰٪</span>
       <button type="button" id="btn-zoom-out" hidden></button>
       <button type="button" id="btn-zoom-in" hidden></button>
+    </div>
+
+    <div class="toolbar-quickbar" aria-label="ابزارهای در دسترس پیش‌فاکتور">
+      <nav class="toolbar-actions" aria-label="عملیات سند">
+        <button type="button" id="btn-new" class="toolbar-btn" title="شروع یک پیش‌فاکتور جدید">
+          <svg><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13 3v6h6"/><line x1="12" y1="12.5" x2="12" y2="17.5"/><line x1="9.5" y1="15" x2="14.5" y2="15"/></svg>
+          <span>جدید</span>
+        </button>
+        <button type="button" id="btn-open" class="toolbar-btn" title="باز کردن پشتیبان پیش‌فاکتور">
+          <svg><path d="M3.5 7.5h6l2-2h9v14h-17z"/><path d="M3.5 10.5h17"/></svg>
+          <span>باز کردن</span>
+        </button>
+        <input type="file" id="file-open" accept="application/json,.json,.pfi" hidden />
+        <button type="button" id="btn-save" class="toolbar-btn" title="ذخیره در همین مرورگر (Ctrl+S)">
+          <svg><path d="M4.5 4h12l3 3v13h-15z"/><path d="M7.5 4v5h7V4"/><rect x="7.5" y="13" width="7" height="6"/></svg>
+          <span>ذخیره</span>
+        </button>
+        <button type="button" id="btn-save-as" class="toolbar-btn" title="ذخیرهٔ یک نسخهٔ مستقل با نام جدید">
+          <svg><path d="M4.5 4h12l3 3v13h-15z"/><path d="M7.5 4v5h7V4"/><line x1="12" y1="13" x2="12" y2="18"/><line x1="9.5" y1="15.5" x2="14.5" y2="15.5"/></svg>
+          <span>ذخیره با نام جدید</span>
+        </button>
+        <div class="toolbar-saved">
+          <button type="button" id="btn-saved-list" class="toolbar-btn" title="فهرست پیش‌فاکتورهای ذخیره‌شده" aria-expanded="false">
+            <svg><path d="M6.5 3.5h11v17l-5.5-3.7-5.5 3.7z"/></svg>
+            <span>ذخیره‌شده‌ها <b class="toolbar-count" id="saved-count">۰</b></span>
+          </button>
+          <div class="saved-panel no-print" id="saved-panel" hidden>
+            <div class="saved-panel-header">
+              <strong>پیش‌فاکتورهای ذخیره‌شده</strong>
+              <button type="button" id="btn-saved-close" class="saved-panel-close" title="بستن">✕</button>
+            </div>
+            <p class="saved-panel-hint">نسخه‌های این فهرست روی همین مرورگر نگهداری می‌شوند. برای پشتیبان دائمی، از «پشتیبان فایل» استفاده کنید.</p>
+            <ul class="saved-list" id="saved-list"></ul>
+            <p class="saved-panel-empty" id="saved-empty">هنوز چیزی ذخیره نشده است.</p>
+          </div>
+        </div>
+        <button type="button" id="btn-export" class="toolbar-btn" title="دریافت پشتیبان قابل انتقال">
+          <svg><path d="M12 3v12"/><polyline points="7.5 10.5 12 15 16.5 10.5"/><path d="M5 19h14"/></svg>
+          <span>پشتیبان فایل</span>
+        </button>
+      </nav>
+
+      <span class="toolbar-quick-divider" aria-hidden="true"></span>
+
+      <div class="orientation-switch toolbar-orientation" role="radiogroup" aria-label="جهت صفحه">
+        <label class="orientation-btn">
+          <input type="radio" name="orientation" value="landscape" id="orientation-landscape" checked />
+          <svg><rect x="2.5" y="6.5" width="19" height="11" rx="2"/></svg><span>افقی</span>
+        </label>
+        <label class="orientation-btn">
+          <input type="radio" name="orientation" value="portrait" id="orientation-portrait" />
+          <svg><rect x="6.5" y="2.5" width="11" height="19" rx="2"/></svg><span>عمودی</span>
+        </label>
+      </div>
+
+      <label class="toolbar-toggle" title="پس‌زمینهٔ هدر و فوتر">
+        <input type="checkbox" id="header-gray-toggle" checked />
+        <span>هدر و فوتر خاکستری</span>
+      </label>
+      <label class="toolbar-toggle toolbar-stamp-toggle" title="نمایش مهر فروشنده در چاپ">
+        <input type="checkbox" id="include-stamp" checked />
+        <span>مهر فروشنده</span>
+      </label>
     </div>
   </header>
 
@@ -160,10 +171,7 @@
         <div class="inv-brand">
           <span class="inv-logo-chip"><img src="assets/logo-foulad-bonyan-mark.webp" alt="آرم شرکت" class="inv-logo" id="inv-logo" /></span>
           <div class="inv-brand-text">
-            <h1 id="inv-company-name" class="inv-company-name-display" dir="rtl">بنیان فولاد داریا</h1>
-            <div class="inv-custom-company-name-wrap no-print" id="custom-company-name-wrap" hidden>
-              <input type="text" id="custom-company-name" class="inv-custom-company-name-input" dir="rtl" aria-label="نام شرکت صادرکننده" placeholder="نام شرکت را وارد کنید" autocomplete="organization" />
-            </div>
+            <h1 id="inv-company-name" class="inv-company-name-display inv-editable-field" dir="rtl" contenteditable="true" role="textbox" aria-label="نام شرکت صادرکننده" spellcheck="false" data-field="company.name" data-placeholder="نام شرکت">بنیان فولاد داریا</h1>
           </div>
         </div>
         <dl class="inv-meta">
@@ -195,23 +203,23 @@
           <div class="inv-card-grid">
             <div class="inv-field inv-field-wide">
               <span class="inv-field-label">نام شخص حقیقی / حقوقی</span>
-              <input type="text" class="inv-input inv-field-value inv-readonly" dir="rtl" data-field="seller.name" aria-label="نام فروشنده" readonly />
+              <input type="text" class="inv-input inv-field-value" dir="rtl" data-field="seller.name" aria-label="نام فروشنده" />
             </div>
             <div class="inv-field inv-field-wide">
               <span class="inv-field-label">نشانی</span>
-              <textarea class="inv-input inv-field-value inv-readonly inv-autogrow" dir="rtl" data-field="seller.address" aria-label="نشانی فروشنده" rows="1" readonly></textarea>
+              <textarea class="inv-input inv-field-value inv-autogrow" dir="rtl" data-field="seller.address" aria-label="نشانی فروشنده" rows="1"></textarea>
             </div>
             <div class="inv-field">
               <span class="inv-field-label">شناسه ملی</span>
-              <input type="text" class="inv-input inv-field-value inv-readonly" dir="ltr" data-field="seller.nationalId" aria-label="شناسه ملی فروشنده" readonly />
+              <input type="text" class="inv-input inv-field-value" dir="ltr" data-field="seller.nationalId" aria-label="شناسه ملی فروشنده" />
             </div>
             <div class="inv-field">
               <span class="inv-field-label">کد پستی</span>
-              <input type="text" class="inv-input inv-field-value inv-readonly" dir="ltr" data-field="seller.postalCode" aria-label="کد پستی فروشنده" readonly />
+              <input type="text" class="inv-input inv-field-value" dir="ltr" data-field="seller.postalCode" aria-label="کد پستی فروشنده" />
             </div>
             <div class="inv-field inv-field-wide">
               <span class="inv-field-label">تلفن</span>
-              <textarea class="inv-input inv-field-value inv-readonly inv-autogrow" dir="ltr" data-field="seller.phone" aria-label="تلفن فروشنده" rows="1" readonly></textarea>
+              <textarea class="inv-input inv-field-value inv-autogrow" dir="ltr" data-field="seller.phone" aria-label="تلفن فروشنده" rows="1"></textarea>
             </div>
           </div>
         </div>
@@ -361,7 +369,7 @@
 
 <div class="app-dialog-backdrop no-print" id="company-editor-dialog" hidden>
   <section class="app-dialog company-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="company-editor-title" aria-describedby="company-editor-description">
-    <form id="company-editor-form">
+    <form id="company-editor-form" autocomplete="off">
       <h2 id="company-editor-title">ثبت شرکت جدید</h2>
       <p id="company-editor-description">اطلاعات این شرکت روی همین مرورگر ذخیره و به فهرست «شرکت صادرکننده» اضافه می‌شود.</p>
       <div class="company-editor-grid">
@@ -383,7 +391,7 @@
         </label>
         <label class="company-editor-field company-editor-field-wide">
           <span>تلفن</span>
-          <input type="text" id="company-editor-phones" />
+          <input type="text" id="company-editor-phones" autocomplete="off" />
         </label>
         <label class="company-editor-field company-editor-field-wide">
           <span>وب‌سایت</span>
@@ -402,7 +410,7 @@
       <p class="company-editor-error" id="company-editor-error" role="alert" hidden></p>
       <div class="app-dialog-actions">
         <button type="button" id="btn-company-editor-cancel">انصراف</button>
-        <button type="submit" class="primary">ثبت و انتخاب شرکت</button>
+        <button type="submit" class="primary" id="btn-company-editor-submit">ثبت و انتخاب شرکت</button>
       </div>
     </form>
   </section>

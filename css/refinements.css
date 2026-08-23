@@ -40,7 +40,8 @@ body,
   background: #fff;
 }
 
-.invoice-sheet.header-gray .inv-head { background: #f2f2f2; }
+.invoice-sheet.header-gray .inv-head,
+.invoice-sheet.header-gray .inv-footer { background: #f2f2f2; }
 
 .inv-card,
 .inv-table-frame,
@@ -63,7 +64,6 @@ body,
 .inv-field-label { padding-top: 0.4mm; font-size: 7.9pt; }
 .inv-field-value.inv-input { font-size: 9pt; line-height: 1.45; }
 
-.inv-readonly { cursor: default; }
 .inv-autogrow,
 .cell-textarea {
   display: block;
@@ -78,17 +78,15 @@ body,
 /* Editing cues exist only in the editor. They are not stationery. */
 @media screen {
   .inv-doc-title.inv-editable-field,
-  .inv-field-value.inv-input:not(.inv-readonly),
+  .inv-company-name-display.inv-editable-field,
+  .inv-field-value.inv-input,
   .cell-input,
   .inv-textarea,
   .inv-meta .inv-input,
   .inv-tax-percent,
-  .inv-footer-site-input:not(.inv-readonly) {
+  .inv-footer-site-input {
     border-bottom: 1px dashed #b9b6af;
   }
-
-  .inv-readonly { border-bottom: 0 !important; }
-  .inv-readonly:focus { background: transparent !important; }
 }
 
 .inv-table-frame { border-color: #8e9396; }
@@ -309,7 +307,8 @@ body,
   .inv-field-value.inv-input { border-bottom: 0 !important; }
   .inv-head,
   .inv-footer { background: #fff !important; }
-  .print-page.header-gray .inv-head { background: #f2f2f2 !important; }
+  .print-page.header-gray .inv-head,
+  .print-page.header-gray .inv-footer { background: #f2f2f2 !important; }
   .invoice-validation,
   .inv-table-actions,
   .inv-stamp-draft-note { display: none !important; }
