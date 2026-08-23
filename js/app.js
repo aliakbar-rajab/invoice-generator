@@ -40,6 +40,10 @@
   // company identity. Keep its branding outside COMPANY_PROFILES so opening
   // one ad-hoc invoice can never leak its logo or stamp into the next one.
   var adHocCompanyAssets = { logo: "", stamp: "" };
+  // Per-invoice branding overrides. `null` means "use the selected company's
+  // default"; a data URL means "use this image only on the current document".
+  // These values may be saved with the invoice, but never mutate a profile.
+  var invoiceAssetOverrides = { logo: null, stamp: null };
   var DEFAULT_INVOICE_ROWS = 8;
 
   // True while meta.number still holds a live suggestion (set by blankInvoice
@@ -157,6 +161,12 @@
   var includeStampEl = document.getElementById("include-stamp");
   var headerGrayToggleEl = document.getElementById("header-gray-toggle");
   var stampUploadFileEl = document.getElementById("stamp-upload-file");
+  var temporaryLogoFileEl = document.getElementById("temporary-logo-file");
+  var temporaryLogoBtnEl = document.getElementById("btn-temporary-logo");
+  var temporaryStampBtnEl = document.getElementById("btn-temporary-stamp");
+  var temporaryLogoSettingsBtnEl = document.getElementById("btn-temporary-logo-settings");
+  var logoResetBtnEl = document.getElementById("btn-logo-reset");
+  var stampResetBtnEl = document.getElementById("btn-stamp-reset");
   var stampUploadPreviewEl = document.getElementById("settings-stamp-preview");
   var stampUploadEmptyEl = document.getElementById("settings-stamp-empty");
   var stampUploadStatusEl = document.getElementById("stamp-upload-status");
@@ -523,10 +533,10 @@
     var stored = Object.assign({}, data, {
       company: Object.assign({}, data.company),
     });
-    if (!isCustomProfile(stored.company.profile)) {
-      delete stored.company.logo;
-      delete stored.company.stamp;
-    }
+    // Built-in defaults already live in the profile. Keep image data only
+    // when this particular invoice has an explicit temporary replacement.
+    if (!isCustomProfile(stored.company.profile) && !stored.company.logoOverride) delete stored.company.logo;
+    if (!isCustomProfile(stored.company.profile) && !stored.company.stampOverride) delete stored.company.stamp;
     return stored;
   }
 
@@ -536,6 +546,32 @@
 
   function resetAdHocCompanyAssets() {
     adHocCompanyAssets = { logo: "", stamp: "" };
+  }
+
+  function resetInvoiceAssetOverrides() {
+    invoiceAssetOverrides = { logo: null, stamp: null };
+    syncTemporaryAssetControls();
+  }
+
+  function baseCompanyAsset(profileKey, assetName) {
+    if (isCustomProfile(profileKey)) return String(adHocCompanyAssets[assetName] || "");
+    return String(resolveProfile(profileKey)[assetName] || "");
+  }
+
+  function effectiveCompanyAsset(profileKey, assetName) {
+    var temporary = invoiceAssetOverrides[assetName];
+    return temporary == null ? baseCompanyAsset(profileKey, assetName) : String(temporary);
+  }
+
+  function syncTemporaryAssetControls() {
+    var hasLogoOverride = invoiceAssetOverrides.logo != null;
+    var hasStampOverride = invoiceAssetOverrides.stamp != null;
+    [temporaryLogoBtnEl, temporaryLogoSettingsBtnEl].forEach(function (button) {
+      if (button) button.classList.toggle("is-active", hasLogoOverride);
+    });
+    if (temporaryStampBtnEl) temporaryStampBtnEl.classList.toggle("is-active", hasStampOverride);
+    if (logoResetBtnEl) logoResetBtnEl.disabled = !hasLogoOverride;
+    if (stampResetBtnEl) stampResetBtnEl.disabled = !hasStampOverride;
   }
 
   var SEQ_KEY_PREFIX = "pishFaktor.dailySeq.";
@@ -597,7 +633,7 @@
     var profileKey = DEFAULT_PROFILE_KEY;
     var profile = resolveProfile(profileKey);
     return {
-      version: 6,
+      version: 7,
       orientation: "landscape",
       headerGray: true,
       font: DEFAULT_FONT_KEY,
@@ -638,9 +674,11 @@
     var profile = resolveProfile(profileKey);
     var key = COMPANY_PROFILES[profileKey] ? profileKey : DEFAULT_PROFILE_KEY;
     resetAdHocCompanyAssets();
-    var brandingProfile = isCustomProfile(key)
-      ? Object.assign({}, profile, adHocCompanyAssets)
-      : profile;
+    resetInvoiceAssetOverrides();
+    var brandingProfile = Object.assign({}, profile, {
+      logo: effectiveCompanyAsset(key, "logo"),
+      stamp: effectiveCompanyAsset(key, "stamp"),
+    });
 
     document.getElementById("inv-company-name").textContent = profile.name;
     // company.address / company.phones no longer have an input of their own:
@@ -657,8 +695,8 @@
     document.querySelector('[data-field="seller.postalCode"]').value = seller.postalCode;
     document.querySelector('[data-field="seller.phone"]').value = seller.phone;
     setCompanyBranding(key, brandingProfile);
-    setStampSrc(brandingProfile.stamp);
     profileSelectEl.value = key;
+    setStampSrc(brandingProfile.stamp);
     lastProfileKey = key;
     refreshStampUploadPreview();
     // Values were set programmatically (no input events), so re-fit the
@@ -726,13 +764,15 @@
     if (!stampUploadPreviewEl || !stampUploadEmptyEl || !stampUploadStatusEl) return;
     var profileKey = profileSelectEl.value;
     var profile = resolveProfile(profileKey);
-    var fallbackStamp = isCustomProfile(profileKey) ? adHocCompanyAssets.stamp : profile.stamp;
+    var fallbackStamp = effectiveCompanyAsset(profileKey, "stamp");
     var src = stampEl.getAttribute("src") || fallbackStamp || "";
     if (src) {
       stampUploadPreviewEl.src = src;
       stampUploadPreviewEl.hidden = false;
       stampUploadEmptyEl.hidden = true;
-      stampUploadStatusEl.textContent = "مهر برای «" + (profile.label || profile.name) + "» آماده است.";
+      stampUploadStatusEl.textContent = invoiceAssetOverrides.stamp != null
+        ? "مهر موقت فقط برای همین پیش‌فاکتور فعال است."
+        : "مهر پیش‌فرض «" + (profile.label || profile.name) + "» فعال است.";
     } else {
       stampUploadPreviewEl.hidden = true;
       stampUploadPreviewEl.removeAttribute("src");
@@ -957,7 +997,7 @@
     statusEl.textContent = text;
     if (statusDotEl) {
       statusDotEl.classList.toggle("is-dirty", isDirty);
-      statusDotEl.classList.toggle("has-error", !!sheet.querySelector(".has-error"));
+      statusDotEl.classList.toggle("has-error", calculationErrors.length > 0);
     }
     updateDocumentIdentity();
   }
@@ -1265,45 +1305,53 @@
 
   function strictMoney(value, emptyAsZero) {
     var normalized = normalizeStrictNumber(value);
-    if (!normalized && emptyAsZero) return { valid: true, value: 0n };
-    if (!/^\d+$/.test(normalized)) return { valid: false, value: 0n };
-    try {
-      return { valid: true, value: BigInt(normalized) };
-    } catch (err) {
-      return { valid: false, value: 0n };
-    }
+    if (!normalized && emptyAsZero) return { valid: true, calculable: true, value: 0n };
+    if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, calculable: false, value: 0n };
+    return {
+      valid: /^\d+$/.test(normalized),
+      calculable: true,
+      value: parseDecimalToBigIntScaled(normalized, 0),
+    };
   }
 
   function strictQuantity(value) {
     var normalized = normalizeStrictNumber(value);
-    if (!/^\d+(?:\.\d{1,3})?$/.test(normalized)) return { valid: false, value: 0n };
+    if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, calculable: false, value: 0n };
     var parsed = parseQtyMilli(normalized);
-    return { valid: parsed > 0n, value: parsed };
+    return {
+      valid: /^\d+(?:\.\d{1,3})?$/.test(normalized) && parsed > 0n,
+      calculable: true,
+      value: parsed,
+    };
   }
 
   function strictPercent(value) {
     var normalized = normalizeStrictNumber(value);
-    if (!/^\d+(?:\.\d{1,2})?$/.test(normalized)) return { valid: false, value: 0n };
+    if (!normalized) return { valid: true, calculable: true, value: 0n };
+    if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, calculable: false, value: 0n };
     var parsed = parsePercentBps(normalized);
-    return { valid: parsed >= 0n && parsed <= 10000n, value: parsed };
+    return {
+      valid: /^\d+(?:\.\d{1,2})?$/.test(normalized) && parsed >= 0n && parsed <= 10000n,
+      calculable: true,
+      value: parsed,
+    };
   }
 
   function clearInlineError(input) {
     var holder = input && (input.closest("td") || input.closest(".inv-field") || input.closest("dd"));
-    if (!holder) return;
-    holder.classList.remove("has-error");
-    holder.removeAttribute("data-error");
-    input.removeAttribute("aria-invalid");
+    if (holder) {
+      holder.classList.remove("has-error");
+      holder.removeAttribute("data-error");
+    }
+    if (input) input.removeAttribute("aria-invalid");
   }
 
-  function setInlineError(input, message, force) {
+  function setInlineError(input) {
     if (!input) return;
     clearInlineError(input);
-    if (!(force || validationRequested || input.dataset.touched === "true")) return;
-    var holder = input.closest("td") || input.closest(".inv-field") || input.closest("dd");
-    if (!holder) return;
-    holder.classList.add("has-error");
-    holder.setAttribute("data-error", message);
+    // Warnings belong in the single banner above the sheet. Keep only the
+    // accessibility state on the control; never paint a cell red or inject a
+    // message into the invoice itself.
     input.setAttribute("aria-invalid", "true");
   }
 
@@ -1313,7 +1361,6 @@
     var gross = 0n;
     var discountSum = 0n;
     var afterDiscountSum = 0n;
-    var hasFinancialError = false;
     calculationErrors = [];
 
     rows.forEach(function (tr, rowPosition) {
@@ -1345,49 +1392,54 @@
       var rowErrors = [];
       if (!descriptionInput.value.trim()) {
         rowErrors.push("شرح کالا یا خدمت وارد نشده است");
-        setInlineError(descriptionInput, "شرح را وارد کنید");
+        setInlineError(descriptionInput);
       }
 
       var qty = strictQuantity(qtyInput.value);
       if (!qty.valid) {
         rowErrors.push("تعداد/مقدار معتبر نیست");
-        setInlineError(qtyInput, "عدد مثبت، حداکثر ۳ رقم اعشار");
+        setInlineError(qtyInput);
       }
 
       var price = strictMoney(priceInput.value, false);
       if (!price.valid) {
         rowErrors.push("مبلغ واحد معتبر نیست");
-        setInlineError(priceInput, "مبلغ صحیح و بدون اعشار");
+        setInlineError(priceInput);
       }
 
       var discount = strictMoney(discountInput.value, true);
       if (!discount.valid) {
         rowErrors.push("تخفیف معتبر نیست");
-        setInlineError(discountInput, "تخفیف صحیح و بدون اعشار");
+        setInlineError(discountInput);
       }
 
       var total = 0n;
-      if (qty.valid && price.valid) total = bigRoundDiv(qty.value * price.value, 1000n);
-      if (discount.valid && qty.valid && price.valid && discount.value > total) {
+      if (qty.calculable && price.calculable) total = bigRoundDiv(qty.value * price.value, 1000n);
+      if (discount.calculable && qty.calculable && price.calculable && total >= 0n && discount.value > total) {
         rowErrors.push("تخفیف از مبلغ کل ردیف بیشتر است");
-        setInlineError(discountInput, "حداکثر " + formatBigRial(total) + " ریال", true);
+        setInlineError(discountInput);
       }
 
-      if (rowErrors.length) {
-        hasFinancialError = true;
-        tr.classList.add("has-financial-error");
-        totalEl.textContent = qty.valid && price.valid ? formatBigRial(total) : "—";
-        afterDiscountEl.textContent = "—";
-        rowErrors.forEach(function (message) {
-          calculationErrors.push("ردیف " + toPersianDigits(rowNumber) + ": " + message);
-        });
-      } else {
-        var afterDiscount = total - discount.value;
+      rowErrors.forEach(function (message) {
+        calculationErrors.push("ردیف " + toPersianDigits(rowNumber) + ": " + message);
+      });
+
+      // A missing description is unrelated to the arithmetic. Invalid numeric
+      // fields also must not poison other rows: an uncomputable row contributes
+      // zero, while an invalid optional discount is treated as zero. A discount
+      // larger than the row total remains mathematically usable (and is merely
+      // reported as a warning).
+      if (qty.calculable && price.calculable) {
+        var usableDiscount = discount.calculable ? discount.value : 0n;
+        var afterDiscount = total - usableDiscount;
         totalEl.textContent = formatBigRial(total);
         afterDiscountEl.textContent = formatBigRial(afterDiscount);
         gross += total;
-        discountSum += discount.value;
+        discountSum += usableDiscount;
         afterDiscountSum += afterDiscount;
+      } else {
+        totalEl.textContent = "";
+        afterDiscountEl.textContent = "";
       }
 
       fitNumericEl(totalEl);
@@ -1401,34 +1453,31 @@
     clearInlineError(taxPercentInput);
     var tax = strictPercent(taxPercentInput.value);
     if (!tax.valid) {
-      hasFinancialError = true;
       calculationErrors.push("درصد مالیات باید بین صفر تا صد باشد");
-      setInlineError(taxPercentInput, "درصد معتبر بین ۰ تا ۱۰۰", true);
+      setInlineError(taxPercentInput);
     }
 
-    if (hasFinancialError) {
-      ["grossTotal", "discountTotal", "afterDiscountTotal", "taxTotal", "netTotal"].forEach(function (key) {
-        setTotal(key, filledRows ? "—" : "");
-      });
-      setTotal("netTotalWords", filledRows ? "اطلاعات مالی نیاز به اصلاح دارد" : "");
-    } else {
-      var taxTotal = bigRoundDiv(afterDiscountSum * tax.value, 10000n);
-      var netTotal = afterDiscountSum + taxTotal;
-      var money = function (value) {
-        return filledRows ? formatBigRial(value) + " ریال" : "";
-      };
-      setTotal("grossTotal", money(gross));
-      setTotal("discountTotal", money(discountSum));
-      setTotal("afterDiscountTotal", money(afterDiscountSum));
-      setTotal("taxTotal", money(taxTotal));
-      setTotal("netTotal", money(netTotal));
-      setTotal("netTotalWords", filledRows ? rialToWordsBig(netTotal) : "");
-    }
+    var usableTax = tax.calculable ? tax.value : 0n;
+    var taxTotal = bigRoundDiv(afterDiscountSum * usableTax, 10000n);
+    var netTotal = afterDiscountSum + taxTotal;
+    var money = function (value) {
+      return filledRows ? formatBigRial(value) + " ریال" : "";
+    };
+    setTotal("grossTotal", money(gross));
+    setTotal("discountTotal", money(discountSum));
+    setTotal("afterDiscountTotal", money(afterDiscountSum));
+    setTotal("taxTotal", money(taxTotal));
+    setTotal("netTotal", money(netTotal));
+    setTotal("netTotalWords", filledRows ? rialToWordsBig(netTotal) : "");
+
+    // Show calculation warnings as the user types. Output validation may add
+    // document-level notes (date, number, parties) to this same banner.
+    renderOutputWarnings(calculationErrors);
 
     if (opts && opts.skipStaticFit) refreshEmptyStates();
     else fitStaticFields();
     updateDocumentIdentity();
-    if (statusDotEl) statusDotEl.classList.toggle("has-error", !!sheet.querySelector(".has-error"));
+    if (statusDotEl) statusDotEl.classList.toggle("has-error", calculationErrors.length > 0);
   }
 
   function clearStaticValidation() {
@@ -1568,7 +1617,7 @@
 
   function collectInvoiceData() {
     var data = {
-      version: 6,
+      version: 7,
       orientation: currentOrientation(),
       headerGray: sheet.classList.contains("header-gray"),
       font: DEFAULT_FONT_KEY,
@@ -1601,10 +1650,10 @@
       postalCode: data.seller.postalCode || "",
       phones: data.seller.phone || "",
     });
-    if (isCustomProfile(profileKey)) {
-      data.company.logo = adHocCompanyAssets.logo;
-      data.company.stamp = adHocCompanyAssets.stamp;
-    }
+    data.company.logo = effectiveCompanyAsset(profileKey, "logo");
+    data.company.stamp = effectiveCompanyAsset(profileKey, "stamp");
+    data.company.logoOverride = invoiceAssetOverrides.logo != null;
+    data.company.stampOverride = invoiceAssetOverrides.stamp != null;
     // meta.validityMode isn't a [data-field] (same as company.profile above)
     // since it's a mode picker, not editable document text.
     data.meta.validityMode = validityModeEl.value;
@@ -1625,20 +1674,6 @@
     if (!COMPANY_PROFILES[profileKey]) profileKey = registerEmbeddedProfile(profileKey, raw && raw.company);
     if (!COMPANY_PROFILES[profileKey]) profileKey = DEFAULT_PROFILE_KEY;
     var profile = resolveProfile(profileKey);
-    if (!isCustomProfile(profileKey) && raw && raw.company) {
-      ["logo", "stamp"].forEach(function (assetName) {
-        var embedded = String(raw.company[assetName] || "");
-        var current = String(profile[assetName] || "");
-        if (!/^data:image\//i.test(embedded) || /^data:image\//i.test(current)) return;
-        profile[assetName] = embedded;
-        try {
-          if (profile.userCreated) persistUserProfiles();
-          else persistProfileAsset(profileKey, assetName, embedded);
-        } catch (err) {
-          // The document still uses the embedded image for this session.
-        }
-      });
-    }
     var defaults = blankInvoice();
     // Field-by-field fallback must come from the RESOLVED profile (the one
     // this file was actually saved under), not always the hardcoded default
@@ -1690,15 +1725,33 @@
         logo: String(data.company.logo || ""),
         stamp: String(data.company.stamp || ""),
       };
+      invoiceAssetOverrides = { logo: null, stamp: null };
     } else {
       resetAdHocCompanyAssets();
+      invoiceAssetOverrides = {
+        logo: data.company.logoOverride === true
+          ? String(data.company.logo || "")
+          : (data.company.logoOverride == null && data.company.logo && String(data.company.logo) !== String(profile.logo || "")
+            ? String(data.company.logo)
+            : null),
+        stamp: data.company.stampOverride === true
+          ? String(data.company.stamp || "")
+          : (data.company.stampOverride == null && data.company.stamp && String(data.company.stamp) !== String(profile.stamp || "")
+            ? String(data.company.stamp)
+            : null),
+      };
     }
     profileSelectEl.value = profileKey;
-    setCompanyBranding(profileKey, customProfile ? adHocCompanyAssets : profile);
+    var effectiveBranding = Object.assign({}, profile, {
+      logo: effectiveCompanyAsset(profileKey, "logo"),
+      stamp: effectiveCompanyAsset(profileKey, "stamp"),
+    });
+    setCompanyBranding(profileKey, effectiveBranding);
     applyHeaderGray(data.headerGray);
     stampRequested = data.includeStamp;
-    setStampSrc(customProfile ? adHocCompanyAssets.stamp : profile.stamp);
+    setStampSrc(effectiveBranding.stamp);
     lastProfileKey = profileKey;
+    syncTemporaryAssetControls();
     syncStampVisibility();
 
     rowsBody.innerHTML = "";
@@ -2062,9 +2115,10 @@
 
   function makeContinuationHeader(pageNo, totalPages) {
     var profileKey = profileSelectEl.value;
-    var profile = isCustomProfile(profileKey)
-      ? Object.assign({}, resolveProfile(profileKey), adHocCompanyAssets)
-      : resolveProfile(profileKey);
+    var profile = Object.assign({}, resolveProfile(profileKey), {
+      logo: effectiveCompanyAsset(profileKey, "logo"),
+      stamp: effectiveCompanyAsset(profileKey, "stamp"),
+    });
     var number = document.querySelector('[data-field="meta.number"]').value;
     var date = document.querySelector('[data-field="meta.date"]').value;
     var header = document.createElement("header");
@@ -2109,8 +2163,6 @@
 
     var validation = clone.querySelector(".invoice-validation");
     if (validation) validation.remove();
-    var tableActions = clone.querySelector(".inv-table-actions");
-    if (tableActions) tableActions.remove();
     var draftNote = clone.querySelector(".inv-stamp-draft-note");
     if (draftNote) draftNote.remove();
 
@@ -2375,6 +2427,70 @@
     if (!settingsPanelEl.hidden) closeSavedPanel();
   }
 
+  async function applyTemporaryLogoFile(file) {
+    if (!file) return;
+    var previousLogo = invoiceAssetOverrides.logo;
+    try {
+      var dataUrl = await resizeImageFile(file, 720);
+      invoiceAssetOverrides.logo = dataUrl;
+      setCompanyBranding(profileSelectEl.value, Object.assign({}, resolveProfile(profileSelectEl.value), {
+        logo: dataUrl,
+      }));
+      syncTemporaryAssetControls();
+      isDirty = true;
+      setStatus("لوگوی موقت فقط برای همین پیش‌فاکتور اعمال شد.");
+    } catch (err) {
+      invoiceAssetOverrides.logo = previousLogo;
+      await showAppDialog({
+        title: "تغییر لوگو ناموفق بود",
+        message: err.message || "تصویر لوگو قابل استفاده نیست.",
+        actions: [{ id: "ok", label: "متوجه شدم", primary: true }],
+      });
+    }
+  }
+
+  async function applyTemporaryStampFile(file) {
+    if (!file) return;
+    var previousStamp = invoiceAssetOverrides.stamp;
+    stampUploadStatusEl.textContent = "در حال آماده‌سازی مهر موقت…";
+    try {
+      var dataUrl = await resizeImageFile(file, 900);
+      invoiceAssetOverrides.stamp = dataUrl;
+      stampRequested = true;
+      setStampSrc(dataUrl);
+      syncTemporaryAssetControls();
+      syncStampVisibility();
+      isDirty = true;
+      setStatus("مهر موقت فقط برای همین پیش‌فاکتور اعمال شد.");
+    } catch (err) {
+      invoiceAssetOverrides.stamp = previousStamp;
+      setStampSrc(effectiveCompanyAsset(profileSelectEl.value, "stamp"));
+      await showAppDialog({
+        title: "تغییر مهر ناموفق بود",
+        message: err.message || "تصویر مهر قابل استفاده نیست.",
+        actions: [{ id: "ok", label: "متوجه شدم", primary: true }],
+      });
+    }
+  }
+
+  function restoreDefaultAsset(assetName) {
+    invoiceAssetOverrides[assetName] = null;
+    var profileKey = profileSelectEl.value;
+    isDirty = true;
+    if (assetName === "logo") {
+      setCompanyBranding(profileKey, Object.assign({}, resolveProfile(profileKey), {
+        logo: effectiveCompanyAsset(profileKey, "logo"),
+      }));
+      setStatus("لوگوی پیش‌فرض شرکت برای این پیش‌فاکتور برگشت.");
+    } else {
+      setStampSrc(effectiveCompanyAsset(profileKey, "stamp"));
+      stampRequested = true;
+      syncStampVisibility();
+      setStatus("مهر پیش‌فرض شرکت برای این پیش‌فاکتور برگشت.");
+    }
+    syncTemporaryAssetControls();
+  }
+
   function wireToolbar() {
     dialogInputEl.addEventListener("keydown", function (e) {
       if (e.key !== "Enter") return;
@@ -2510,43 +2626,31 @@
       }
     });
 
-    document.getElementById("btn-stamp-upload").addEventListener("click", function () {
-      stampUploadFileEl.click();
+    [temporaryLogoBtnEl, temporaryLogoSettingsBtnEl].forEach(function (button) {
+      if (button) button.addEventListener("click", function () {
+        closeSettingsPanel();
+        temporaryLogoFileEl.click();
+      });
+    });
+    temporaryLogoFileEl.addEventListener("change", async function () {
+      var file = this.files && this.files[0];
+      this.value = "";
+      await applyTemporaryLogoFile(file);
+    });
+
+    [temporaryStampBtnEl, document.getElementById("btn-stamp-upload")].forEach(function (button) {
+      if (button) button.addEventListener("click", function () {
+        closeSettingsPanel();
+        stampUploadFileEl.click();
+      });
     });
     stampUploadFileEl.addEventListener("change", async function () {
       var file = this.files && this.files[0];
       this.value = "";
-      if (!file) return;
-      var profileKey = profileSelectEl.value;
-      var profile = resolveProfile(profileKey);
-      var adHocProfile = isCustomProfile(profileKey);
-      var previousStamp = adHocProfile ? adHocCompanyAssets.stamp : profile.stamp || "";
-      stampUploadStatusEl.textContent = "در حال آماده‌سازی مهر…";
-      try {
-        var dataUrl = await resizeImageFile(file, 900);
-        if (adHocProfile) {
-          adHocCompanyAssets.stamp = dataUrl;
-        } else {
-          profile.stamp = dataUrl;
-          if (profile.userCreated) persistUserProfiles();
-          else persistProfileAsset(profileKey, "stamp", dataUrl);
-        }
-        stampRequested = true;
-        setStampSrc(dataUrl);
-        syncStampVisibility();
-        isDirty = true;
-        setStatus("مهر جدید برای «" + (profile.label || profile.name) + "» ثبت شد.");
-      } catch (err) {
-        if (adHocProfile) adHocCompanyAssets.stamp = previousStamp;
-        else profile.stamp = previousStamp;
-        setStampSrc(previousStamp);
-        await showAppDialog({
-          title: "افزودن مهر ناموفق بود",
-          message: err.message || "تصویر مهر قابل استفاده نیست.",
-          actions: [{ id: "ok", label: "متوجه شدم", primary: true }],
-        });
-      }
+      await applyTemporaryStampFile(file);
     });
+    logoResetBtnEl.addEventListener("click", function () { restoreDefaultAsset("logo"); });
+    stampResetBtnEl.addEventListener("click", function () { restoreDefaultAsset("stamp"); });
 
     includeStampEl.addEventListener("change", function () {
       stampRequested = this.checked;

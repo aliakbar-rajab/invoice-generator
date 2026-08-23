@@ -75,7 +75,8 @@ body,
 
 .inv-autogrow { min-height: 1.65em; }
 
-/* Editing cues exist only in the editor. They are not stationery. */
+/* Keep the resting HTML sheet visually identical to print. Editing affordance
+   appears only when the pointer or keyboard is actually on a field. */
 @media screen {
   .inv-doc-title.inv-editable-field,
   .inv-company-name-display.inv-editable-field,
@@ -85,7 +86,18 @@ body,
   .inv-meta .inv-input,
   .inv-tax-percent,
   .inv-footer-site-input {
-    border-bottom: 1px dashed #b9b6af;
+    border-bottom: 1px solid transparent;
+  }
+
+  .inv-doc-title.inv-editable-field:hover,
+  .inv-company-name-display.inv-editable-field:hover,
+  .inv-field-value.inv-input:hover,
+  .cell-input:hover,
+  .inv-textarea:hover,
+  .inv-meta .inv-input:hover,
+  .inv-tax-percent:hover,
+  .inv-footer-site-input:hover {
+    border-bottom-color: #c9c6bf;
   }
 }
 
@@ -114,34 +126,6 @@ body,
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
 }
-
-/* Row count is user-controlled; every visible row also remains in print. */
-.inv-table-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 2px 2px;
-  color: #707279;
-  font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
-  font-size: 10.5px;
-}
-
-.invoice-add-row {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding-inline: 10px;
-  border: 1px solid #aeb1b6;
-  border-radius: 6px;
-  background: #fff;
-  color: #292b2f;
-  font: inherit;
-  font-weight: 750;
-  cursor: pointer;
-}
-.invoice-add-row:hover { border-color: #6f7278; background: #f7f7f7; }
-.invoice-add-row svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; }
 
 /* A short items table is followed by purposeful white space. The commercial
    summary and signatures form the lower anchor of the page. */
@@ -189,23 +173,6 @@ body,
 .invoice-validation strong { display: block; }
 .invoice-validation ul { margin: 4px 0 0; padding-inline-start: 20px; }
 
-.inv-table td.has-error,
-.inv-field.has-error { position: relative; background: #fff1f2 !important; }
-.inv-table td.has-error .cell-input,
-.inv-field.has-error .inv-input,
-.inv-meta dd.has-error .inv-input { border-bottom-color: #b92734 !important; }
-.inv-table td.has-error::after,
-.inv-field.has-error::after,
-.inv-meta dd.has-error::after {
-  content: attr(data-error);
-  display: block;
-  margin-top: 1px;
-  color: #a32732;
-  font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
-  font-size: 7.5pt;
-  line-height: 1.35;
-}
-.inv-table tr.has-financial-error .cell-computed { color: #a32732; }
 .numeric-overflow { color: #a32732 !important; }
 
 /* Print clones contain text nodes rather than form controls. */
@@ -310,6 +277,5 @@ body,
   .print-page.header-gray .inv-head,
   .print-page.header-gray .inv-footer { background: #f2f2f2 !important; }
   .invoice-validation,
-  .inv-table-actions,
   .inv-stamp-draft-note { display: none !important; }
 }

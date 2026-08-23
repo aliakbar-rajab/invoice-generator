@@ -50,6 +50,15 @@
 
       <div class="toolbar-spacer"></div>
 
+      <button type="button" id="btn-temporary-logo" class="toolbar-btn" title="تغییر لوگو فقط برای همین پیش‌فاکتور">
+        <svg><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="m5.5 17 4.2-4 3.1 2.6 2.5-2.2 3.2 3.6"/></svg>
+        <span>لوگوی موقت</span>
+      </button>
+      <button type="button" id="btn-temporary-stamp" class="toolbar-btn" title="تغییر مهر فقط برای همین پیش‌فاکتور">
+        <svg><circle cx="12" cy="9" r="4"/><path d="M7 13.5h10l1.5 5h-13z"/><path d="M5 20h14"/></svg>
+        <span>مهر موقت</span>
+      </button>
+
       <div class="toolbar-settings-wrap">
         <button type="button" id="btn-settings" class="toolbar-btn toolbar-settings-btn" aria-expanded="false" title="مدیریت شرکت، لوگو و فایل مهر">
           <svg><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.12 2.12-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V20.3h-3v-.08a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.12-2.12.06-.06A1.7 1.7 0 0 0 7 15a1.7 1.7 0 0 0-1.56-1.03H5.3v-3h.14A1.7 1.7 0 0 0 7 9.94a1.7 1.7 0 0 0-.34-1.88L6.6 8l2.12-2.12.06.06a1.7 1.7 0 0 0 1.88.34A1.7 1.7 0 0 0 11.7 4.7V4.6h3v.1a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06L19.8 8l-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.03h.14v3h-.14A1.7 1.7 0 0 0 19.4 15z"/></svg>
@@ -62,12 +71,16 @@
             <button type="button" id="btn-company-editor" class="settings-action">ثبت شرکت جدید</button>
           </div>
           <div class="settings-section settings-stamp-tools">
-            <span class="settings-section-copy"><strong>مهر فروشنده</strong><small id="stamp-upload-status">مهر پروفایل فعلی</small></span>
+            <span class="settings-section-copy"><strong>نشان‌های موقت همین سند</strong><small id="stamp-upload-status">مهر پیش‌فرض شرکت فعلی</small></span>
             <span class="settings-stamp-preview" aria-hidden="true">
               <img id="settings-stamp-preview" alt="" hidden />
               <span id="settings-stamp-empty">بدون مهر</span>
             </span>
-            <button type="button" id="btn-stamp-upload" class="settings-action">افزودن / تغییر مهر</button>
+            <button type="button" id="btn-temporary-logo-settings" class="settings-action">تغییر موقت لوگو</button>
+            <button type="button" id="btn-logo-reset" class="settings-action">لوگوی پیش‌فرض</button>
+            <button type="button" id="btn-stamp-upload" class="settings-action">تغییر موقت مهر</button>
+            <button type="button" id="btn-stamp-reset" class="settings-action">مهر پیش‌فرض</button>
+            <input type="file" id="temporary-logo-file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden />
             <input type="file" id="stamp-upload-file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden />
           </div>
           <div class="settings-section settings-template-info">
@@ -95,13 +108,12 @@
       <nav class="toolbar-actions" aria-label="عملیات سند">
         <button type="button" id="btn-new" class="toolbar-btn" title="شروع یک پیش‌فاکتور جدید">
           <svg><path d="M13 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/><path d="M13 3v6h6"/><line x1="12" y1="12.5" x2="12" y2="17.5"/><line x1="9.5" y1="15" x2="14.5" y2="15"/></svg>
-          <span>جدید</span>
+          <span>پیش‌فاکتور جدید</span>
         </button>
-        <button type="button" id="btn-open" class="toolbar-btn" title="باز کردن پشتیبان پیش‌فاکتور">
-          <svg><path d="M3.5 7.5h6l2-2h9v14h-17z"/><path d="M3.5 10.5h17"/></svg>
-          <span>باز کردن</span>
+        <button type="button" id="btn-add-row" class="toolbar-btn toolbar-add-row" title="افزودن یک ردیف یا قلم جدید به انتهای جدول">
+          <svg><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          <span>افزودن ردیف/قلم جدید</span>
         </button>
-        <input type="file" id="file-open" accept="application/json,.json,.pfi" hidden />
         <button type="button" id="btn-save" class="toolbar-btn" title="ذخیره در همین مرورگر (Ctrl+S)">
           <svg><path d="M4.5 4h12l3 3v13h-15z"/><path d="M7.5 4v5h7V4"/><rect x="7.5" y="13" width="7" height="6"/></svg>
           <span>ذخیره</span>
@@ -129,6 +141,11 @@
           <svg><path d="M12 3v12"/><polyline points="7.5 10.5 12 15 16.5 10.5"/><path d="M5 19h14"/></svg>
           <span>پشتیبان فایل</span>
         </button>
+        <button type="button" id="btn-open" class="toolbar-btn" title="باز کردن پشتیبان پیش‌فاکتور">
+          <svg><path d="M3.5 7.5h6l2-2h9v14h-17z"/><path d="M3.5 10.5h17"/></svg>
+          <span>بازکردن پشتیبان</span>
+        </button>
+        <input type="file" id="file-open" accept="application/json,.json,.pfi" hidden />
       </nav>
 
       <span class="toolbar-quick-divider" aria-hidden="true"></span>
@@ -156,7 +173,7 @@
   </header>
 
   <div class="invoice-validation no-print" id="invoice-validation" hidden role="status" aria-live="polite">
-    <strong>نکات پیش از چاپ</strong>
+    <strong>هشدارها</strong>
     <ul id="invoice-validation-list"></ul>
   </div>
 
@@ -280,14 +297,6 @@
         <tbody id="inv-rows"></tbody>
       </table>
       </div>
-      <div class="inv-table-actions no-print">
-        <button type="button" id="btn-add-row" class="invoice-add-row">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          <span>افزودن قلم جدید</span>
-        </button>
-        <span>برای رفتن به همین ستون در ردیف بعد، Enter بزنید.</span>
-      </div>
-
       <section class="inv-summary">
         <div class="inv-totals">
           <div>

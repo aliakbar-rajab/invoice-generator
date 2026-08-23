@@ -196,7 +196,14 @@
   gap: 5px;
   flex-wrap: wrap;
   flex: none;
+  min-width: 0;
+  max-width: 100%;
 }
+
+/* The action names are the primary navigation contract. Keeping this row
+   text-first avoids a third toolbar line and leaves more of the A4 preview
+   visible, while utility buttons in the top row retain their icons. */
+.toolbar-quickbar .toolbar-actions .toolbar-btn > svg { display: none; }
 
 .toolbar-spacer { flex: 1 1 auto; }
 
@@ -245,6 +252,17 @@
 
 .toolbar-btn:hover,
 .settings-action:hover { background: #35363d; border-color: #505159; }
+
+.toolbar-btn.is-active {
+  border-color: #d8a54a;
+  background: rgb(216 165 74 / 15%);
+  color: #f4d08e;
+}
+
+.settings-action:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
 
 .toolbar-btn:focus-visible,
 .settings-action:focus-visible,
