@@ -117,16 +117,23 @@
   var BUILT_IN_PROFILE_ORDER = ["fouladBonyan", "karaBorjParseh"];
   var DEFAULT_PROFILE_KEY = "fouladBonyan";
 
+  // Pristine copies of the shipped profiles, taken before
+  // hydrateCompanyProfiles() merges any stored override on top of them.
+  // COMPANY_PROFILES is mutated in place by that hydration, so once a user
+  // has edited a built-in company this snapshot is the only remaining record
+  // of the values the app shipped with — and therefore what
+  // restoreBuiltInProfileDefaults() puts back.
+  var BUILT_IN_PROFILE_DEFAULTS = {};
+  Object.keys(COMPANY_PROFILES).forEach(function (key) {
+    BUILT_IN_PROFILE_DEFAULTS[key] = Object.assign({}, COMPANY_PROFILES[key]);
+  });
+
   // ---------- Document fonts ----------
-  // Keys match the toolbar dropdown's values (see index.html #font-select)
-  // and the html[data-font="…"] selectors in invoice.css that actually set
-  // --doc-font; this map only has to agree with those two, nothing else.
-  var FONT_FAMILIES = {
-    parastoo: "پرستو",
-    vazirmatn: "وزیرمتن",
-    nazanin: "B Nazanin",
-    mitra: "B Mitra",
-  };
+  // One approved corporate typeface. The key is written to html[data-font]
+  // at boot, where the matching selector in invoice.css sets --doc-font.
+  // The user-facing font picker was removed; this constant and the
+  // html[data-font="vazirmatn"] rule are the only two places left that
+  // have to agree.
   var DEFAULT_FONT_KEY = "vazirmatn";
 
   // ---------- Document font size ----------
@@ -157,11 +164,6 @@
   var stampAreaEl = stampEl.parentElement;
   var profileSelectEl = document.getElementById("company-profile");
   var validityModeEl = document.getElementById("meta-validity-mode");
-  var fontSelectEl = document.getElementById("font-select");
-  var fontSizeSelectEl = document.getElementById("font-size-select");
-  var zoomValueEl = document.getElementById("zoom-value");
-  var zoomOutBtnEl = document.getElementById("btn-zoom-out");
-  var zoomInBtnEl = document.getElementById("btn-zoom-in");
   var savedPanelEl = document.getElementById("saved-panel");
   var savedListEl = document.getElementById("saved-list");
   var savedEmptyEl = document.getElementById("saved-empty");
@@ -197,6 +199,7 @@
   var companyEditorTitleEl = document.getElementById("company-editor-title");
   var companyEditorDescriptionEl = document.getElementById("company-editor-description");
   var companyEditorSubmitEl = document.getElementById("btn-company-editor-submit");
+  var companyEditorResetEl = document.getElementById("btn-company-editor-reset");
   var companyEditorNameEl = document.getElementById("company-editor-name");
   var companyEditorNationalIdEl = document.getElementById("company-editor-national-id");
   var companyEditorPostalCodeEl = document.getElementById("company-editor-postal-code");
@@ -257,6 +260,18 @@
 
   function showAppDialog(options) {
     options = options || {};
+    // A second dialog can be requested while one is still open — Ctrl+S with
+    // the naming prompt already up, "حذف" on two rows in a row, etc. Settling
+    // the outstanding promise as a cancel BEFORE the new dialog takes over the
+    // single #app-dialog element is what keeps the first `await` from hanging
+    // forever on a resolve function nothing holds a reference to any more.
+    // The abandoned caller sees exactly what it would see if the user had
+    // pressed انصراف, which is the only outcome it can still safely take.
+    if (activeDialogResolve) {
+      var abandoned = activeDialogResolve;
+      activeDialogResolve = null;
+      abandoned({ action: "cancel", value: "" });
+    }
     dialogTitleEl.textContent = options.title || "";
     dialogMessageEl.textContent = options.message || "";
 
@@ -380,6 +395,77 @@
       website: profile.website,
     };
     localStorage.setItem(PROFILE_OVERRIDES_KEY, JSON.stringify(overrides));
+  }
+
+  // True when a shipped profile currently carries user edits — either detail
+  // overrides or a replaced logo. Drives whether «بازگردانی به پیش‌فرض» has
+  // anything to undo.
+  function hasBuiltInProfileOverride(profileKey) {
+    if (!BUILT_IN_PROFILE_DEFAULTS[profileKey] || isCustomProfile(profileKey)) return false;
+    return !!(readStoredObject(PROFILE_OVERRIDES_KEY)[profileKey] || readStoredObject(PROFILE_ASSETS_KEY)[profileKey]);
+  }
+
+  // Drops both stored override records for a shipped profile and puts the
+  // snapshot taken at load time back into COMPANY_PROFILES, so the company
+  // returns to exactly what the app ships with. User-created profiles are not
+  // eligible — they have no shipped defaults to fall back to, and deleting
+  // them is a different (destructive) operation.
+  //
+  // The reset spans two storage keys, so it is all-or-nothing: reporting
+  // failure while having already dropped one of them would leave the user with
+  // a half-reset company after the next reload (shipped name, but their own
+  // logo still applied) and no indication that anything changed. Returns ""
+  // on success, otherwise a reason the caller turns into a message.
+  function restoreBuiltInProfileDefaults(profileKey) {
+    var pristine = BUILT_IN_PROFILE_DEFAULTS[profileKey];
+    if (!pristine || isCustomProfile(profileKey) || (COMPANY_PROFILES[profileKey] || {}).userCreated) return "ineligible";
+
+    var keys = [PROFILE_OVERRIDES_KEY, PROFILE_ASSETS_KEY];
+    var previous = [];
+    var payloads = [];
+    try {
+      // Read both raw values first. Unlike readStoredObject, a record that
+      // does not parse is a hard stop rather than an empty object — writing
+      // this function's own `{}` over it would destroy every OTHER profile's
+      // override too. Same "never overwrite unreadable storage" rule the
+      // saved-list migrations already follow.
+      for (var i = 0; i < keys.length; i += 1) {
+        var raw = localStorage.getItem(keys[i]);
+        previous.push(raw);
+        var parsed = raw ? JSON.parse(raw) : {};
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("unreadable");
+        delete parsed[profileKey];
+        payloads.push(JSON.stringify(parsed));
+      }
+    } catch (err) {
+      return "unreadable";
+    }
+
+    var written = 0;
+    try {
+      for (var w = 0; w < keys.length; w += 1) {
+        localStorage.setItem(keys[w], payloads[w]);
+        written += 1;
+      }
+    } catch (err) {
+      // Roll the earlier key back to its exact previous bytes so "restore
+      // failed" means nothing changed, on this load and on the next one.
+      while (written > 0) {
+        written -= 1;
+        try {
+          if (previous[written] === null) localStorage.removeItem(keys[written]);
+          else localStorage.setItem(keys[written], previous[written]);
+        } catch (rollbackErr) {
+          // Storage is refusing writes entirely; there is nothing further this
+          // can do beyond reporting the failure to the caller.
+        }
+      }
+      return "write";
+    }
+
+    COMPANY_PROFILES[profileKey] = Object.assign({}, pristine);
+    renderCompanyProfileOptions(profileKey);
+    return "";
   }
 
   function renderCompanyProfileOptions(selectedKey) {
@@ -1053,6 +1139,15 @@
       ? "تغییرات به‌عنوان مشخصات پایهٔ این شرکت در همین مرورگر ذخیره می‌شود و برای سندهای جدید هم در دسترس است."
       : "اطلاعات این شرکت روی همین مرورگر ذخیره و به فهرست «شرکت صادرکننده» اضافه می‌شود.";
     companyEditorSubmitEl.textContent = editingExisting ? "ذخیرهٔ تغییرات شرکت" : "ثبت و انتخاب شرکت";
+    // Only a shipped company can be reset — a user-created one has no
+    // defaults to fall back to, and «سایر» is document-scoped. The button
+    // stays visible but disabled when the profile is already untouched, so
+    // it reads as "nothing to undo" rather than silently disappearing.
+    if (companyEditorResetEl) {
+      var resettable = editingExisting && !profile.userCreated && !!BUILT_IN_PROFILE_DEFAULTS[selectedKey];
+      companyEditorResetEl.hidden = !resettable;
+      companyEditorResetEl.disabled = resettable && !hasBuiltInProfileOverride(selectedKey);
+    }
     closeSettingsPanel();
     companyEditorDialogEl.hidden = false;
   }
@@ -1229,44 +1324,18 @@
 
   // ---------- Document font ----------
 
+  // Both of these normalize a loaded document onto the single approved
+  // typeface and scale: any `font` / `fontScale` carried by an older saved
+  // file is deliberately ignored. The picker UI they used to drive is gone,
+  // so each now writes only the CSS hook that actually has an effect
+  // (html[data-font] and --doc-font-scale, both consumed by invoice.css).
   function setFont() {
-    // One approved corporate typeface keeps every saved and printed invoice
-    // visually consistent. Older files carrying another font are normalized.
     document.documentElement.setAttribute("data-font", DEFAULT_FONT_KEY);
-    fontSelectEl.value = DEFAULT_FONT_KEY;
   }
 
   function setFontScale() {
     document.documentElement.style.setProperty("--doc-font-scale", DEFAULT_FONT_SCALE);
-    fontSizeSelectEl.value = String(DEFAULT_FONT_SCALE);
-    updateZoomStepperUI();
     return DEFAULT_FONT_SCALE;
-  }
-
-  // Keeps the visible zoom stepper (the toolbar's real UI for this control)
-  // in sync with the hidden #font-size-select it actually drives — the
-  // displayed percentage and the −/+ buttons' disabled-at-the-ends state.
-  function updateZoomStepperUI() {
-    if (!zoomValueEl) return;
-    var idx = fontSizeSelectEl.selectedIndex;
-    var pct = Math.round(parseFloat(fontSizeSelectEl.options[idx].value) * 100);
-    zoomValueEl.textContent = toPersianDigits(String(pct)) + "٪";
-    if (zoomOutBtnEl) zoomOutBtnEl.disabled = idx <= 0;
-    if (zoomInBtnEl) zoomInBtnEl.disabled = idx >= fontSizeSelectEl.options.length - 1;
-  }
-
-  // Steps the hidden #font-size-select by one preset and dispatches the
-  // same "change" event a native select would fire, so the stepper reuses
-  // that listener's existing setFontScale/recalcAll/isDirty logic exactly
-  // rather than duplicating it here.
-  function stepFontSize(delta) {
-    var max = fontSizeSelectEl.options.length - 1;
-    var idx = fontSizeSelectEl.selectedIndex + delta;
-    if (idx < 0) idx = 0;
-    if (idx > max) idx = max;
-    if (idx === fontSizeSelectEl.selectedIndex) return;
-    fontSizeSelectEl.selectedIndex = idx;
-    fontSizeSelectEl.dispatchEvent(new Event("change", { bubbles: true }));
   }
 
   // ---------- Numeric auto-fit ----------
@@ -1292,10 +1361,6 @@
 
   function autoGrowTextareas() {
     document.querySelectorAll(".inv-autogrow, .inv-textarea, .cell-textarea").forEach(autoGrowTextarea);
-  }
-
-  function autoGrowNotes() {
-    autoGrowTextarea(document.querySelector(".inv-textarea"));
   }
 
   // The footer's and amount-words strip's "is this section actually empty"
@@ -2347,36 +2412,112 @@
     setStatus("فایل پشتیبان دانلود شد؛ وضعیت سند همچنان " + (isDirty ? "ذخیره‌نشده است." : "ذخیره است."));
   }
 
+  function isPlainObject(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+  }
+
+  // A file chosen from disk is arbitrary JSON until proven otherwise — the
+  // picker accepts any .json and users do pick the wrong file. Every document
+  // this app has ever exported (versions 4 through 7) carries the same
+  // skeleton: a numeric `version`, a `meta` object, `buyer`/`seller`/`company`
+  // objects, and an `items` array of row objects. Requiring exactly that
+  // rejects unrelated JSON while still opening older backups. applyInvoiceData
+  // remains defensive field-by-field; this decides only whether the file is
+  // one of ours at all, and returns the reason when it isn't.
+  function invoiceDocumentProblem(raw) {
+    if (!isPlainObject(raw)) return "محتوای فایل یک سند نیست.";
+    if (typeof raw.version !== "number" || !isFinite(raw.version) || raw.version <= 0) {
+      return "نشانهٔ نسخهٔ سند در فایل پیدا نشد.";
+    }
+    if (!isPlainObject(raw.meta)) return "بخش «مشخصات سند» در فایل وجود ندارد.";
+    var missingParty = ["buyer", "seller", "company"].filter(function (key) {
+      return !isPlainObject(raw[key]);
+    });
+    if (missingParty.length) return "بخش مشخصات طرفین سند در فایل ناقص است.";
+    if (!Array.isArray(raw.items)) return "فهرست اقلام در فایل وجود ندارد.";
+    if (!raw.items.every(isPlainObject)) return "ساختار اقلام در فایل خراب است.";
+    return "";
+  }
+
+  function readFileAsText(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result)); };
+      reader.onerror = function () { reject(new Error("read failed")); };
+      reader.readAsText(file, "utf-8");
+    });
+  }
+
+  function reportUnopenableFile(title, message, details) {
+    return showAppDialog({
+      title: title,
+      message: message,
+      details: details || [],
+      actions: [{ id: "ok", label: "متوجه شدم", primary: true }],
+    });
+  }
+
+  // Every rejection path below returns before touching the editor: the open
+  // document, its rows, its selected company and its ذخیره‌نشده state are all
+  // left exactly as they were. The unsaved-changes confirmation is likewise
+  // deferred until the file is known to be applicable, so a mis-picked file
+  // can never cost the user their work — not even the prompt.
   async function openFromFile(file) {
+    var text;
+    try {
+      text = await readFileAsText(file);
+    } catch (err) {
+      await reportUnopenableFile("خطا در خواندن فایل", "خواندن فایل «" + file.name + "» ممکن نشد. سند فعلی بدون تغییر باقی ماند.");
+      return false;
+    }
+
+    var data;
+    try {
+      data = JSON.parse(text);
+    } catch (err) {
+      await reportUnopenableFile("فایل نامعتبر", "فایل «" + file.name + "» خراب است یا ساختار JSON سالمی ندارد. سند فعلی بدون تغییر باقی ماند.");
+      return false;
+    }
+
+    var problem = invoiceDocumentProblem(data);
+    if (problem) {
+      await reportUnopenableFile(
+        "این فایل پیش‌فاکتور نیست",
+        "فایل «" + file.name + "» یک سند پیش‌فاکتور معتبر نیست و باز نشد. سند فعلی بدون تغییر باقی ماند.",
+        [problem]
+      );
+      return false;
+    }
+
     if (isDirty) {
       var confirmed = await confirmApp("باز کردن فایل", "تغییرات ذخیره‌نشده از بین می‌رود. فایل «" + file.name + "» باز شود؟", "باز کردن");
-      if (!confirmed) return;
+      if (!confirmed) return false;
     }
-    var reader = new FileReader();
-    reader.onload = function () {
-      try {
-        var data = JSON.parse(String(reader.result));
-        applyInvoiceData(data);
-        // A file opened from disk isn't yet one of the browser's saved
-        // entries — it's detached until the user hits "ذخیره" again, at
-        // which point it's saved as a new named entry rather than silently
-        // overwriting whatever was last open in the browser.
-        currentSavedId = null;
-        currentSavedName = "";
-        isDirty = false;
-        // The number came from the opened file, not a live suggestion —
-        // switching companies afterward must not overwrite it.
-        numberIsAutoSuggested = false;
-        setStatus("فایل «" + file.name + "» بازشد.");
-        renderSavedList();
-      } catch (err) {
-        showAppDialog({ title: "فایل نامعتبر", message: "فایل انتخاب‌شده معتبر نیست یا خراب است.", actions: [{ id: "ok", label: "متوجه شدم", primary: true }] });
-      }
-    };
-    reader.onerror = function () {
-      showAppDialog({ title: "خطا در خواندن فایل", message: "خواندن فایل ممکن نشد.", actions: [{ id: "ok", label: "متوجه شدم", primary: true }] });
-    };
-    reader.readAsText(file, "utf-8");
+
+    // The shape check above proves the file is one of ours, not that every
+    // field inside it is sane. This boundary is the same one the old
+    // FileReader.onload had around applyInvoiceData: without it a throw here
+    // would surface only as an unhandled rejection, leaving a half-applied
+    // sheet and no message at all.
+    try {
+      applyInvoiceData(data);
+    } catch (err) {
+      await reportUnopenableFile("فایل نامعتبر", "فایل «" + file.name + "» ساختار سالمی ندارد و کامل باز نشد.");
+      return false;
+    }
+    // A file opened from disk isn't yet one of the browser's saved entries —
+    // it's detached until the user hits "ذخیره" again, at which point it's
+    // saved as a new named entry rather than silently overwriting whatever
+    // was last open in the browser.
+    currentSavedId = null;
+    currentSavedName = "";
+    isDirty = false;
+    // The number came from the opened file, not a live suggestion — switching
+    // companies afterward must not overwrite it.
+    numberIsAutoSuggested = false;
+    setStatus("فایل «" + file.name + "» بازشد.");
+    renderSavedList();
+    return true;
   }
 
   // ---------- Print document generation ----------
@@ -2460,6 +2601,20 @@
     clone.classList.toggle("layout-compact", !!options.compact);
     clone.classList.remove("orientation-landscape", "orientation-portrait");
     clone.classList.add("orientation-" + options.orientation);
+
+    // Diagnostic-only (see diagnoseFinalPageOverflow): re-measure the very
+    // same page with the notes block emptied, so a closing-block overflow can
+    // be attributed to the notes text instead of reported as a bare "does not
+    // fit". Never set on a page that is actually rendered for printing.
+    if (options.blankNotes) {
+      var clonedNotes = clone.querySelector('[data-field="notes"]');
+      if (clonedNotes) {
+        clonedNotes.value = "";
+        // autoGrowTextarea pins an explicit pixel height on the live element,
+        // and cloneNode copies that inline style along with it.
+        clonedNotes.style.height = "";
+      }
+    }
 
     var cloneBody = clone.querySelector("tbody");
     cloneBody.innerHTML = "";
@@ -2556,6 +2711,26 @@
     return count;
   }
 
+  // Why the closing block (notes + amount-in-words + totals + signatures +
+  // footer) could not be fitted onto a final page. If that same page fits
+  // once the notes textarea is emptied, the notes text is the one thing the
+  // user can actually shorten and the warning says so; otherwise the block is
+  // simply taller than the chosen paper orientation allows.
+  function diagnoseFinalPageOverflow(rows, orientation, compact) {
+    var notesEl = document.querySelector('[data-field="notes"]');
+    if (!notesEl || !notesEl.value.trim()) return "closing-block";
+    var withoutNotes = clonePrintPage(rows.length ? [rows[rows.length - 1]] : [], {
+      orientation: orientation,
+      compact: compact,
+      continuation: true,
+      finalPage: true,
+      pageNo: 2,
+      totalPages: 2,
+      blankNotes: true,
+    });
+    return pageFits(withoutNotes) ? "notes" : "closing-block";
+  }
+
   function buildPrintPlan(rows, orientation) {
     if (singlePageFits(rows, orientation, false)) {
       return { compact: false, chunks: [rows], orientation: orientation };
@@ -2573,12 +2748,15 @@
       pageNo: 2,
       totalPages: 2,
     });
+    // Not even a single item row fits alongside the closing block (notes +
+    // amount-in-words + totals + signatures + footer), so nothing here is
+    // the fault of any particular row — deliberately no overflowRowIndex,
+    // since the last row's index would be an arbitrary scapegoat.
     if (rows.length && finalCount === 0) {
       return {
         compact: compact,
         chunks: [],
         orientation: orientation,
-        overflowRowIndex: rows.length - 1,
         overflowKind: "final-page",
       };
     }
@@ -2714,14 +2892,33 @@
     }
 
     var plan = buildPrintPlan(rows, orientation);
-    if (plan.overflowRowIndex != null) {
-      warnings.push(
-        "ردیف " + toPersianDigits(plan.overflowRowIndex + 1) +
-        " بلندتر از ظرفیت یک صفحهٔ A4 است؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد. شرح را کوتاه‌تر یا به چند ردیف تقسیم کنید"
-      );
+    if (plan.overflowKind) {
+      // Two genuinely different failures, and telling them apart is the whole
+      // point: "row" means one item's own شرح is taller than a page, while
+      // "final-page" means the closing block leaves no room for even a single
+      // row. Reporting the latter against an arbitrary (usually blank) row
+      // sent the user hunting for a long description that does not exist.
+      var overflowStatus;
+      if (plan.overflowKind === "row") {
+        warnings.push(
+          "ردیف " + toPersianDigits(plan.overflowRowIndex + 1) +
+          " بلندتر از ظرفیت یک صفحهٔ A4 است؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد. شرح را کوتاه‌تر یا به چند ردیف تقسیم کنید"
+        );
+        overflowStatus = "چاپ انجام نشد؛ یک ردیف در صفحهٔ A4 جا نمی‌شود.";
+      } else if (diagnoseFinalPageOverflow(rows, plan.orientation, plan.compact) === "notes") {
+        warnings.push(
+          "متن «توضیحات» بلندتر از فضای باقی‌ماندهٔ صفحهٔ پایانی است؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد. متن توضیحات را کوتاه‌تر کنید"
+        );
+        overflowStatus = "چاپ انجام نشد؛ متن توضیحات در صفحهٔ A4 جا نمی‌شود.";
+      } else {
+        warnings.push(
+          "بخش پایانی سند (توضیحات، مبلغ به حروف، جمع‌کل، امضاها و فوتر) در یک صفحهٔ A4 جا نمی‌شود؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد. متن توضیحات را کوتاه‌تر کنید یا جهت صفحه را تغییر دهید"
+        );
+        overflowStatus = "چاپ انجام نشد؛ بخش پایانی سند در صفحهٔ A4 جا نمی‌شود.";
+      }
       renderOutputWarnings(warnings);
       cleanupPrintDocument();
-      setStatus("چاپ انجام نشد؛ یک ردیف در صفحهٔ A4 جا نمی‌شود.");
+      setStatus(overflowStatus);
       return false;
     }
     var fitVerification = verifyPrintPlanFits(plan);
@@ -2955,6 +3152,41 @@
       openCompanyEditor("create");
     });
     document.getElementById("btn-company-editor-cancel").addEventListener("click", closeCompanyEditor);
+    if (companyEditorResetEl) {
+      companyEditorResetEl.addEventListener("click", async function () {
+        var profileKey = companyEditorProfileKey;
+        var pristine = profileKey && BUILT_IN_PROFILE_DEFAULTS[profileKey];
+        if (!pristine) return;
+        // Close the editor before confirming: #app-dialog and
+        // #company-editor-dialog are two separate backdrops, and stacking one
+        // modal over the other is neither needed nor readable. Whatever was
+        // typed into the editor's fields is about to be discarded anyway.
+        closeCompanyEditor();
+        var confirmed = await confirmApp(
+          "بازگردانی مشخصات پیش‌فرض",
+          "تغییرات ذخیره‌شدهٔ شما روی «" + pristine.label + "» پاک می‌شود و مشخصات اصلی برنامه برمی‌گردد. اقلام و اطلاعات خریدارِ سند فعلی حفظ می‌شود.",
+          "بازگردانی",
+          true
+        );
+        if (!confirmed) return;
+        var failure = restoreBuiltInProfileDefaults(profileKey);
+        if (failure) {
+          setStatus(failure === "unreadable"
+            ? "بازگردانی انجام نشد؛ مشخصات ذخیره‌شدهٔ شرکت‌ها خوانا نیست و برای جلوگیری از حذف اطلاعات دست‌نخورده ماند."
+            : "بازگردانی مشخصات پیش‌فرض ممکن نشد؛ ذخیرهٔ مرورگر در دسترس نیست. چیزی تغییر نکرد.");
+          return;
+        }
+        applyCompanyProfile(profileKey);
+        stampRequested = true;
+        syncStampVisibility();
+        if (numberIsAutoSuggested) {
+          var numberInput = document.querySelector('[data-field="meta.number"]');
+          if (numberInput) numberInput.value = suggestInvoiceNumber(profileKey, currentInvoiceDateValue());
+        }
+        isDirty = true;
+        setStatus("مشخصات پیش‌فرض «" + pristine.label + "» بازگردانی شد.");
+      });
+    }
     companyEditorDialogEl.addEventListener("click", function (e) {
       if (e.target === companyEditorDialogEl) closeCompanyEditor();
     });

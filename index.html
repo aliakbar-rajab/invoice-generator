@@ -95,13 +95,6 @@
         <span>چاپ / PDF</span>
       </button>
 
-      <!-- Kept for backward compatibility with older saved files. Document
-           typography is intentionally fixed to the approved corporate system. -->
-      <select id="font-select" hidden><option value="vazirmatn" selected>وزیرمتن</option></select>
-      <select id="font-size-select" hidden><option value="1" selected>۱۰۰٪</option></select>
-      <span id="zoom-value" hidden>۱۰۰٪</span>
-      <button type="button" id="btn-zoom-out" hidden></button>
-      <button type="button" id="btn-zoom-in" hidden></button>
     </div>
 
     <div class="toolbar-quickbar" aria-label="ابزارهای در دسترس پیش‌فاکتور">
@@ -181,12 +174,16 @@
     <div class="sheet-scale-wrapper" id="sheet-scale-wrapper">
     <article class="invoice-sheet orientation-landscape" id="invoice-sheet" dir="rtl" data-company="fouladBonyan">
 
-      <img class="inv-watermark" id="inv-watermark" src="assets/logo-foulad-bonyan-mark.webp" alt="" aria-hidden="true" />
+      <!-- No src here (nor on #inv-logo below): setCompanyBranding() assigns
+           the selected company profile's own asset during boot, before first
+           paint. A hardcoded default would be a second, discarded download of
+           a logo the active profile may not even use. -->
+      <img class="inv-watermark" id="inv-watermark" alt="" aria-hidden="true" />
 
       <header class="inv-head">
         <p class="inv-doc-title inv-editable-field" contenteditable="true" role="textbox" aria-label="عنوان سند" spellcheck="false" data-field="meta.title" data-placeholder="عنوان سند">پیش‌فاکتور</p>
         <div class="inv-brand">
-          <span class="inv-logo-chip"><img src="assets/logo-foulad-bonyan-mark.webp" alt="آرم شرکت" class="inv-logo" id="inv-logo" /></span>
+          <span class="inv-logo-chip"><img alt="آرم شرکت" class="inv-logo" id="inv-logo" /></span>
           <div class="inv-brand-text">
             <h1 id="inv-company-name" class="inv-company-name-display inv-editable-field" dir="rtl" contenteditable="true" role="textbox" aria-label="نام شرکت صادرکننده" spellcheck="false" data-field="company.name" data-placeholder="نام شرکت">بنیان فولاد داریا</h1>
           </div>
@@ -418,6 +415,7 @@
       </div>
       <p class="company-editor-error" id="company-editor-error" role="alert" hidden></p>
       <div class="app-dialog-actions">
+        <button type="button" id="btn-company-editor-reset" class="danger" title="حذف تغییرات ذخیره‌شده و بازگشت به مشخصات اصلی برنامه" hidden>بازگردانی به پیش‌فرض</button>
         <button type="button" id="btn-company-editor-cancel">انصراف</button>
         <button type="submit" class="primary" id="btn-company-editor-submit">ثبت و انتخاب شرکت</button>
       </div>

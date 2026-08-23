@@ -89,12 +89,6 @@ function bigRoundDiv(numerator, denominator) {
   return negResult ? -result : result;
 }
 
-function clampBig(value, min, max) {
-  if (value < min) return min;
-  if (value > max) return max;
-  return value;
-}
-
 // Groups an ASCII digit string into 3s from the right with `sep`, e.g.
 // "1234567" -> "1٬234٬567". Pure string manipulation on the BigInt's own
 // exact decimal representation — no length limit.

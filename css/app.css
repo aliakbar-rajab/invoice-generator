@@ -572,6 +572,12 @@
 .app-dialog-actions button { min-height: 38px; padding-inline: 14px; border: 1px solid #d0d1d5; border-radius: 7px; background: #f5f5f6; color: #292a2e; font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; }
 .app-dialog-actions button.primary { border-color: #b47a1e; background: #dca743; color: #251a08; }
 .app-dialog-actions button.danger { border-color: #d99ba1; background: #fff0f1; color: #992631; }
+/* «بازگردانی به پیش‌فرض» stays visible while a shipped profile is untouched,
+   so the disabled state has to read as "nothing to undo" rather than as an
+   ordinary button that silently ignores clicks. */
+.app-dialog-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+.company-editor-dialog .app-dialog-actions { justify-content: space-between; }
+.company-editor-dialog .app-dialog-actions #btn-company-editor-reset { margin-inline-end: auto; }
 
 .company-editor-dialog {
   width: min(620px, 96vw);

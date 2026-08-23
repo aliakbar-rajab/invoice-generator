@@ -47,6 +47,12 @@ async function openApp(page) {
   await page.addInitScript(() => {
     window.__printCalls = 0;
     window.print = () => { window.__printCalls += 1; };
+    // Any promise the app fails to settle shows up here rather than vanishing
+    // into the console, which is what the openFromFile rewrite has to avoid.
+    window.__rejections = [];
+    window.addEventListener("unhandledrejection", (event) => {
+      window.__rejections.push(String((event.reason && event.reason.message) || event.reason));
+    });
   });
   await page.goto(baseURL);
   await expect(page.locator("#inv-rows tr")).toHaveCount(7);
@@ -65,6 +71,27 @@ async function saveNamed(page, name, saveAs = false) {
   await page.locator("#app-dialog-input").fill(name);
   await page.locator("#app-dialog-actions button").first().click();
   await expect(page.locator("#toolbar-status")).toContainText("ذخیره شد");
+}
+
+function sheetOverflow(page) {
+  return page.locator("#invoice-sheet").evaluate((sheet) => sheet.scrollHeight - sheet.clientHeight);
+}
+
+async function fillFirstRowAndBuyer(page) {
+  await fillValidFirstRow(page);
+  await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار آزمایشی");
+}
+
+// Drives the hidden file input the same way the picker does, so the whole
+// openFromFile path (read → parse → shape check → apply) runs for real.
+async function importJsonFile(page, filename, contents) {
+  await page.evaluate(({ name, body }) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([body], name, { type: "application/json" }));
+    const input = document.getElementById("file-open");
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, { name: filename, body: typeof contents === "string" ? contents : JSON.stringify(contents) });
 }
 
 function asciiDigits(value) {
@@ -234,9 +261,15 @@ test("postal code permanently follows the address for both parties", async ({ pa
 test("fresh orientation defaults change only untouched item rows", async ({ page }) => {
   await openApp(page);
   await page.getByRole("radio", { name: "عمودی", exact: true }).check();
-  await expect(page.locator("#inv-rows tr")).toHaveCount(8);
+  await expect(page.locator("#inv-rows tr")).toHaveCount(14);
+  // The row counts are not arbitrary: each orientation's default is the most
+  // rows that still leave the fresh sheet inside one A4 page. Asserting the
+  // fit as well as the number means raising either default without checking
+  // the geometry fails here instead of only showing up as a clipped print.
+  expect(await sheetOverflow(page)).toBeLessThanOrEqual(0);
   await page.getByRole("radio", { name: "افقی", exact: true }).check();
   await expect(page.locator("#inv-rows tr")).toHaveCount(7);
+  expect(await sheetOverflow(page)).toBeLessThanOrEqual(0);
 
   await page.getByLabel("ردیف ۱ — شرح کالا یا خدمت", { exact: true }).fill("قلم کاربر");
   await page.getByRole("radio", { name: "عمودی", exact: true }).check();
@@ -298,4 +331,315 @@ test("the app still boots in its supported direct file mode", async ({ page }) =
   await page.goto(pathToFileURL(path.join(repoRoot, "index.html")).href);
   await expect(page.locator("#inv-rows tr")).toHaveCount(7);
   await expect(page.locator("#toolbar-status")).toContainText("آماده برای ثبت پیش‌فاکتور جدید");
+});
+
+test("a too-tall item row is blamed on that row, by number", async ({ page }) => {
+  await openApp(page);
+  await fillFirstRowAndBuyer(page);
+  await page.getByLabel("ردیف ۱ — شرح کالا یا خدمت", { exact: true })
+    .fill("شرح بسیار طولانی ".repeat(400));
+
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+  await expect(page.locator("#invoice-validation-list li").first())
+    .toContainText("ردیف ۱ بلندتر از ظرفیت یک صفحهٔ A4 است");
+  await expect(page.locator("#toolbar-status")).toContainText("یک ردیف در صفحهٔ A4 جا نمی‌شود");
+  expect(await page.evaluate(() => window.__printCalls)).toBe(0);
+  await expect(page.locator("#print-document .print-page")).toHaveCount(0);
+});
+
+test("closing-block overflow blames the notes text, never an innocent row", async ({ page }) => {
+  await openApp(page);
+  await fillFirstRowAndBuyer(page);
+  // Only row 1 carries anything; rows 2-7 are blank. The old code reported
+  // this as "ردیف ۷ ... شرح را کوتاه‌تر کنید", sending the user hunting for a
+  // long description on an empty row.
+  await page.locator('[data-field="notes"]').fill("یادداشت طولانی ".repeat(200));
+
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+  const warnings = page.locator("#invoice-validation-list li");
+  await expect(warnings.first()).toContainText("متن «توضیحات» بلندتر از فضای باقی‌ماندهٔ صفحهٔ پایانی است");
+  await expect(page.locator("#toolbar-status")).toContainText("متن توضیحات در صفحهٔ A4 جا نمی‌شود");
+  // The decisive assertion: no item row is accused at all.
+  const texts = await warnings.allTextContents();
+  expect(texts.some((text) => text.includes("بلندتر از ظرفیت یک صفحهٔ A4"))).toBe(false);
+  expect(await page.evaluate(() => window.__printCalls)).toBe(0);
+  await expect(page.locator("#print-document .print-page")).toHaveCount(0);
+});
+
+test("shortening the notes makes the same document printable again", async ({ page }) => {
+  await openApp(page);
+  await fillFirstRowAndBuyer(page);
+  await page.locator('[data-field="notes"]').fill("یادداشت طولانی ".repeat(200));
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+  await expect(page.locator("#toolbar-status")).toContainText("چاپ انجام نشد");
+
+  await page.locator('[data-field="notes"]').fill("یادداشت کوتاه");
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(1);
+  const pages = page.locator("#print-document .print-page");
+  expect(await pages.count()).toBeGreaterThan(0);
+  const metrics = await pages.evaluateAll((elements) => elements.map((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight
+  })));
+  expect(metrics.every((metric) => metric.scrollHeight <= metric.clientHeight + 2)).toBe(true);
+});
+
+test("unrelated JSON is rejected without touching the open document", async ({ page }) => {
+  await openApp(page);
+  await fillValidFirstRow(page, "250000");
+  await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار اصلی");
+  await expect(page.locator("#toolbar-status")).toContainText("ذخیره‌نشده");
+
+  const snapshot = () => page.evaluate(() => ({
+    buyer: document.querySelector('[data-field="buyer.name"]').value,
+    description: document.querySelector('[data-row-field="description"]').value,
+    number: document.querySelector('[data-field="meta.number"]').value,
+    net: document.querySelector('[data-total="netTotal"]').textContent,
+    rows: document.querySelectorAll("#inv-rows tr").length
+  }));
+  const before = await snapshot();
+
+  await importJsonFile(page, "random.json", { hello: "world" });
+  await expect(page.locator("#app-dialog")).toBeVisible();
+  await expect(page.locator("#app-dialog-title")).toContainText("این فایل پیش‌فاکتور نیست");
+  await page.locator("#app-dialog-actions button").first().click();
+  await expect(page.locator("#app-dialog")).toBeHidden();
+
+  expect(await snapshot()).toEqual(before);
+  // A rejected import is a no-op, not an implicit save: unsaved work must
+  // still be reported as unsaved.
+  await expect(page.locator("#toolbar-status")).toContainText("ذخیره‌نشده");
+});
+
+test("malformed and near-miss JSON shapes are all rejected", async ({ page }) => {
+  await openApp(page);
+  await fillValidFirstRow(page, "250000");
+  const baseline = await page.evaluate(() => document.querySelector('[data-row-field="description"]').value);
+
+  const rejected = [
+    ["broken.json", "{ not json at all"],
+    ["array.json", JSON.stringify([1, 2, 3])],
+    ["scalar.json", JSON.stringify(42)],
+    ["null.json", JSON.stringify(null)],
+    ["package.json", JSON.stringify({ name: "x", version: "1.0.0", scripts: {} })],
+    ["no-items.json", JSON.stringify({ version: 7, meta: {}, buyer: {}, seller: {}, company: {} })],
+    ["no-meta.json", JSON.stringify({ version: 7, buyer: {}, seller: {}, company: {}, items: [] })],
+    ["no-parties.json", JSON.stringify({ version: 7, meta: {}, items: [] })],
+    ["bad-items.json", JSON.stringify({ version: 7, meta: {}, buyer: {}, seller: {}, company: {}, items: ["x"] })],
+    ["no-version.json", JSON.stringify({ meta: {}, buyer: {}, seller: {}, company: {}, items: [] })]
+  ];
+
+  for (const [name, body] of rejected) {
+    await importJsonFile(page, name, body);
+    await expect(page.locator("#app-dialog")).toBeVisible();
+    await expect(page.locator("#app-dialog-message")).toContainText("سند فعلی بدون تغییر باقی ماند");
+    await page.locator("#app-dialog-actions button").first().click();
+    await expect(page.locator("#app-dialog")).toBeHidden();
+    expect(await page.evaluate(() => document.querySelector('[data-row-field="description"]').value)).toBe(baseline);
+  }
+});
+
+test("the app's own export still passes the importer's shape check", async ({ page }) => {
+  await openApp(page);
+  await fillValidFirstRow(page, "777000");
+  await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار واقعی");
+
+  // Capture exactly what "پشتیبان فایل" writes, by intercepting the Blob the
+  // exporter hands to URL.createObjectURL. This is the compatibility half of
+  // the shape check: the validator must never reject the app's own output.
+  const exported = await page.evaluate(async () => {
+    let captured = null;
+    const realCreate = URL.createObjectURL;
+    const realClick = HTMLAnchorElement.prototype.click;
+    URL.createObjectURL = function (blob) { captured = blob; return "blob:stub"; };
+    HTMLAnchorElement.prototype.click = function () {};
+    document.getElementById("btn-export").click();
+    URL.createObjectURL = realCreate;
+    HTMLAnchorElement.prototype.click = realClick;
+    return captured ? await captured.text() : null;
+  });
+  expect(exported).toBeTruthy();
+  expect(JSON.parse(exported).version).toBe(7);
+
+  // The document has unsaved changes, so "جدید" asks before discarding them.
+  await page.locator("#btn-new").click();
+  await expect(page.locator("#app-dialog")).toBeVisible();
+  await page.locator("#app-dialog-actions button.primary").click();
+  await expect(page.getByLabel("ردیف ۱ — شرح کالا یا خدمت", { exact: true })).toHaveValue("");
+
+  await importJsonFile(page, "export.json", exported);
+  await expect(page.locator("#app-dialog")).toBeHidden();
+  await expect(page.locator("#toolbar-status")).toContainText("بازشد");
+  await expect(page.getByLabel("ردیف ۱ — شرح کالا یا خدمت", { exact: true })).toHaveValue("کالای آزمایشی");
+  await expect(page.getByLabel("نام خریدار", { exact: true })).toHaveValue("خریدار واقعی");
+});
+
+test("a second dialog cancels the first instead of orphaning it", async ({ page }) => {
+  await openApp(page);
+  await fillValidFirstRow(page);
+
+  await page.getByRole("button", { name: "ذخیره", exact: true }).click();
+  await expect(page.locator("#app-dialog")).toBeVisible();
+  // Ctrl+S again while the naming prompt is still up: the first saveCurrent
+  // must settle (as a cancel) rather than await a resolve nobody holds.
+  await page.keyboard.press("Control+s");
+  await expect(page.locator("#app-dialog")).toBeVisible();
+  await page.locator("#app-dialog-input").fill("سند یکتا");
+  await page.locator("#app-dialog-actions button").first().click();
+  await expect(page.locator("#toolbar-status")).toContainText("ذخیره شد");
+
+  const entries = await page.evaluate(() => Object.keys(localStorage)
+    .filter((key) => key.indexOf("preinvoice.saved.entry.") === 0)
+    .map((key) => JSON.parse(localStorage.getItem(key)).name));
+  expect(entries).toEqual(["سند یکتا"]);
+  await expect(page.locator("#saved-count")).toHaveText("۱");
+});
+
+test("a built-in company profile can be restored to its shipped defaults", async ({ page }) => {
+  await openApp(page);
+  const shippedName = (await page.locator("#inv-company-name").textContent()).trim();
+
+  await page.getByRole("button", { name: "تنظیمات", exact: true }).click();
+  await page.locator("#btn-company-profile-edit").click();
+  await expect(page.locator("#company-editor-dialog")).toBeVisible();
+  // Nothing overridden yet, so the reset action is present but inert.
+  await expect(page.locator("#btn-company-editor-reset")).toBeVisible();
+  await expect(page.locator("#btn-company-editor-reset")).toBeDisabled();
+
+  await page.locator("#company-editor-name").fill("نام دستکاری‌شده");
+  await page.locator("#btn-company-editor-submit").click();
+  await expect(page.locator("#inv-company-name")).toHaveText("نام دستکاری‌شده");
+  expect(await page.evaluate(() => localStorage.getItem("preinvoice.profileOverrides.v1")))
+    .toContain("نام دستکاری‌شده");
+
+  await page.reload();
+  await expect(page.locator("#inv-company-name")).toHaveText("نام دستکاری‌شده");
+
+  await page.getByRole("button", { name: "تنظیمات", exact: true }).click();
+  await page.locator("#btn-company-profile-edit").click();
+  await expect(page.locator("#btn-company-editor-reset")).toBeEnabled();
+  await page.locator("#btn-company-editor-reset").click();
+  await expect(page.locator("#app-dialog")).toBeVisible();
+  await page.locator("#app-dialog-actions button").first().click();
+
+  await expect(page.locator("#inv-company-name")).toHaveText(shippedName);
+  await expect(page.locator('[data-field="seller.name"]')).toHaveValue(shippedName);
+  // The reset has to outlive a reload, or the override is still on disk.
+  await page.reload();
+  await expect(page.locator("#inv-company-name")).toHaveText(shippedName);
+});
+
+test("the header logo is fetched once, from the active profile only", async ({ page }) => {
+  const assetRequests = [];
+  page.on("request", (request) => {
+    const url = request.url();
+    if (url.includes("/assets/")) assetRequests.push(url.slice(url.lastIndexOf("/") + 1));
+  });
+  await openApp(page);
+  await page.waitForTimeout(500);
+
+  const logos = assetRequests.filter((name) => name.includes("logo"));
+  expect(logos).toEqual(["logo-foulad-bonyan-mark.png"]);
+  const rendered = await page.evaluate(() => ({
+    logo: document.getElementById("inv-logo").getAttribute("src"),
+    watermark: document.getElementById("inv-watermark").getAttribute("src")
+  }));
+  expect(rendered.logo).toBe("assets/logo-foulad-bonyan-mark.png");
+  expect(rendered.watermark).toBe("assets/logo-foulad-bonyan-mark.png");
+});
+
+// Seeds an overridden built-in profile, then opens its editor ready to reset.
+async function openResetDialogWithOverride(page, seedExtra) {
+  await page.addInitScript((extra) => {
+    localStorage.setItem("preinvoice.profileOverrides.v1", JSON.stringify({
+      fouladBonyan: { label: "دستکاری", name: "دستکاری", nationalId: "۱", address: "ا", postalCode: "۱", phones: "۱", website: "w" }
+    }));
+    localStorage.setItem("preinvoice.profileAssets.v1", extra);
+  }, seedExtra);
+  await page.goto(baseURL);
+  await expect(page.locator("#inv-rows tr")).toHaveCount(7);
+  await expect(page.locator("#inv-company-name")).toHaveText("دستکاری");
+  await page.getByRole("button", { name: "تنظیمات", exact: true }).click();
+  await page.locator("#btn-company-profile-edit").click();
+  await expect(page.locator("#company-editor-dialog")).toBeVisible();
+}
+
+test("a reset whose second storage write fails changes nothing at all", async ({ page }) => {
+  await openResetDialogWithOverride(page, JSON.stringify({
+    fouladBonyan: { logo: "data:image/webp;base64,AAAA" },
+    karaBorjParseh: { logo: "data:image/webp;base64,BBBB" }
+  }));
+
+  // Fail only the assets write, i.e. the second of the reset's two setItems.
+  await page.evaluate(() => {
+    const real = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === "preinvoice.profileAssets.v1") throw new DOMException("quota", "QuotaExceededError");
+      return real.call(this, key, value);
+    };
+  });
+
+  await page.locator("#btn-company-editor-reset").click();
+  await expect(page.locator("#app-dialog")).toBeVisible();
+  await page.locator("#app-dialog-actions button.danger").click();
+  await expect(page.locator("#toolbar-status")).toContainText("چیزی تغییر نکرد");
+
+  // The details override must have been rolled back, not left deleted.
+  const stored = await page.evaluate(() => ({
+    details: JSON.parse(localStorage.getItem("preinvoice.profileOverrides.v1") || "{}"),
+    assets: JSON.parse(localStorage.getItem("preinvoice.profileAssets.v1") || "{}")
+  }));
+  expect(stored.details.fouladBonyan).toBeTruthy();
+  expect(stored.assets.fouladBonyan).toBeTruthy();
+  expect(stored.assets.karaBorjParseh).toBeTruthy();
+
+  // And the failure must survive a reload as "nothing happened", not as a
+  // half-reset profile.
+  await page.reload();
+  await expect(page.locator("#inv-company-name")).toHaveText("دستکاری");
+});
+
+test("a reset refuses to overwrite an unreadable profile-assets record", async ({ page }) => {
+  await openResetDialogWithOverride(page, "{{{ corrupt");
+
+  await page.locator("#btn-company-editor-reset").click();
+  await expect(page.locator("#app-dialog")).toBeVisible();
+  await page.locator("#app-dialog-actions button.danger").click();
+  await expect(page.locator("#toolbar-status")).toContainText("خوانا نیست");
+
+  // The corrupt bytes stay exactly as they were, so another profile's logo
+  // override remains recoverable by hand.
+  expect(await page.evaluate(() => localStorage.getItem("preinvoice.profileAssets.v1"))).toBe("{{{ corrupt");
+  await expect(page.locator("#inv-company-name")).toHaveText("دستکاری");
+  await page.reload();
+  await expect(page.locator("#inv-company-name")).toHaveText("دستکاری");
+});
+
+test("a document that throws while applying reports it instead of rejecting silently", async ({ page }) => {
+  await openApp(page);
+  await fillValidFirstRow(page, "4321");
+
+  // Force applyInvoiceData to throw on the next call only, standing in for a
+  // structurally valid file whose contents the editor cannot render.
+  await page.evaluate(() => {
+    const body = document.getElementById("inv-rows");
+    Object.defineProperty(body, "innerHTML", {
+      configurable: true,
+      set() { throw new Error("apply exploded"); },
+      get() { return ""; }
+    });
+  });
+
+  await importJsonFile(page, "valid-shape.json", {
+    version: 7, meta: {}, buyer: {}, seller: {}, company: {}, taxPercent: "۱۰", notes: "", items: []
+  });
+  // The shape passes, so the unsaved-changes prompt comes first; only after
+  // confirming does applyInvoiceData run and blow up.
+  await expect(page.locator("#app-dialog-title")).toContainText("باز کردن فایل");
+  await page.locator("#app-dialog-actions button.primary").click();
+  await expect(page.locator("#app-dialog")).toBeVisible();
+  await expect(page.locator("#app-dialog-title")).toContainText("فایل نامعتبر");
+  await page.locator("#app-dialog-actions button").first().click();
+  expect(await page.evaluate(() => window.__rejections || [])).toEqual([]);
 });
