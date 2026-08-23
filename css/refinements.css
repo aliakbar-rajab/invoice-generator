@@ -127,9 +127,9 @@ body,
   font-feature-settings: "tnum" 1;
 }
 
-/* A short items table is followed by purposeful white space. The commercial
-   summary and signatures form the lower anchor of the page. */
-.inv-summary { margin-top: auto; }
+/* Match the editor to the final print clone exactly: the summary always sits
+   2mm below the items table, even after the table grows. */
+.inv-summary { margin-top: 2mm; }
 .inv-footer { margin-top: 2.1mm; background: #fff; border-width: var(--edge); }
 .inv-footer-site-input.inv-input {
   font-family: "Vazirmatn", Tahoma, Arial, sans-serif;

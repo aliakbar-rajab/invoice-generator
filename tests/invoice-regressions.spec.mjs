@@ -49,7 +49,7 @@ async function openApp(page) {
     window.print = () => { window.__printCalls += 1; };
   });
   await page.goto(baseURL);
-  await expect(page.locator("#inv-rows tr")).toHaveCount(8);
+  await expect(page.locator("#inv-rows tr")).toHaveCount(7);
 }
 
 async function fillValidFirstRow(page, price = "1000") {
@@ -219,12 +219,58 @@ test("an empty invoice remains printable without a modal or warning inside the p
   await expect(page.locator("#print-document .invoice-validation")).toHaveCount(0);
 });
 
+test("postal code permanently follows the address for both parties", async ({ page }) => {
+  await openApp(page);
+  const fieldOrder = await page.locator(".inv-card").evaluateAll((cards) => cards.map((card) =>
+    Array.from(card.querySelectorAll("[data-field]"), (field) => field.dataset.field)
+  ));
+  expect(fieldOrder[0].slice(0, 3)).toEqual(["seller.name", "seller.address", "seller.postalCode"]);
+  expect(fieldOrder[1].slice(0, 3)).toEqual(["buyer.name", "buyer.address", "buyer.postalCode"]);
+  await expect(page.locator(".inv-meta-icon")).toHaveCount(3);
+  await expect(page.locator(".inv-card-head-icon")).toHaveCount(2);
+  await expect(page.getByLabel("نشانی خریدار", { exact: true })).not.toHaveAttribute("placeholder");
+});
+
+test("fresh orientation defaults change only untouched item rows", async ({ page }) => {
+  await openApp(page);
+  await page.getByRole("radio", { name: "عمودی", exact: true }).check();
+  await expect(page.locator("#inv-rows tr")).toHaveCount(8);
+  await page.getByRole("radio", { name: "افقی", exact: true }).check();
+  await expect(page.locator("#inv-rows tr")).toHaveCount(7);
+
+  await page.getByLabel("ردیف ۱ — شرح کالا یا خدمت", { exact: true }).fill("قلم کاربر");
+  await page.getByRole("radio", { name: "عمودی", exact: true }).check();
+  await expect(page.locator("#inv-rows tr")).toHaveCount(7);
+});
+
+test("editor and print clone keep the same gap below a grown landscape table", async ({ page }) => {
+  await openApp(page);
+  for (let index = 0; index < 5; index += 1) {
+    await page.getByRole("button", { name: "افزودن ردیف/قلم جدید", exact: true }).click();
+  }
+  const screenGap = await page.locator("#invoice-sheet").evaluate((sheet) => {
+    const table = sheet.querySelector(".inv-table-frame").getBoundingClientRect();
+    const summary = sheet.querySelector(".inv-summary").getBoundingClientRect();
+    return summary.top - table.bottom;
+  });
+  expect(screenGap).toBeGreaterThan(5);
+
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+  await page.locator("#print-document").evaluate((documentRoot) => documentRoot.classList.add("is-measuring"));
+  const printGap = await page.locator("#print-document .print-page").last().evaluate((sheet) => {
+    const table = sheet.querySelector(".inv-table-frame").getBoundingClientRect();
+    const summary = sheet.querySelector(".inv-summary").getBoundingClientRect();
+    return summary.top - table.bottom;
+  });
+  expect(Math.abs(screenGap - printGap)).toBeLessThanOrEqual(1);
+});
+
 test("a normal multi-page plan fits every generated A4 page and renders to PDF", async ({ page }, testInfo) => {
   await openApp(page);
   await page.getByLabel("درصد مالیات و عوارض", { exact: true }).fill("10");
 
   for (let index = 0; index < 24; index += 1) {
-    if (index >= 8) await page.getByRole("button", { name: "افزودن ردیف/قلم جدید", exact: true }).click();
+    if (index >= 7) await page.getByRole("button", { name: "افزودن ردیف/قلم جدید", exact: true }).click();
     const rowNumber = String(index + 1).replace(/[0-9]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) + 1728));
     await page.getByLabel(`ردیف ${rowNumber} — شرح کالا یا خدمت`, { exact: true }).fill(`قلم آزمایشی چندصفحه‌ای شماره ${index + 1}`);
     await page.getByLabel(`ردیف ${rowNumber} — تعداد یا مقدار`, { exact: true }).fill("1");
@@ -250,6 +296,6 @@ test("a normal multi-page plan fits every generated A4 page and renders to PDF",
 
 test("the app still boots in its supported direct file mode", async ({ page }) => {
   await page.goto(pathToFileURL(path.join(repoRoot, "index.html")).href);
-  await expect(page.locator("#inv-rows tr")).toHaveCount(8);
+  await expect(page.locator("#inv-rows tr")).toHaveCount(7);
   await expect(page.locator("#toolbar-status")).toContainText("آماده برای ثبت پیش‌فاکتور جدید");
 });

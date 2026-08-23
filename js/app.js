@@ -48,7 +48,10 @@
   // default"; a data URL means "use this image only on the current document".
   // These values may be saved with the invoice, but never mutate a profile.
   var invoiceAssetOverrides = { logo: null, stamp: null };
-  var DEFAULT_INVOICE_ROWS = 8;
+  var DEFAULT_INVOICE_ROWS_BY_ORIENTATION = { landscape: 7, portrait: 8 };
+  // Only a fresh, untouched document follows the orientation defaults. Once
+  // the user edits the item rows, their exact count becomes authoritative.
+  var defaultRowCountManaged = false;
 
   // True while meta.number still holds a live suggestion (set by blankInvoice
   // on New/boot) rather than something the user typed or a value that came in
@@ -704,9 +707,9 @@
       taxPercent: "۱۰",
       notes: "",
       includeStamp: true,
-      // Eight rows are only the starting point for a new document. From this
+      // Seven landscape rows are only the starting point for a new document. From this
       // point onward the user's exact row count is authoritative.
-      items: makeBlankRows(DEFAULT_INVOICE_ROWS),
+      items: makeBlankRows(defaultInvoiceRowCount("landscape")),
     };
   }
 
@@ -1012,6 +1015,30 @@
     return rows;
   }
 
+  function defaultInvoiceRowCount(orientation) {
+    return orientation === "portrait"
+      ? DEFAULT_INVOICE_ROWS_BY_ORIENTATION.portrait
+      : DEFAULT_INVOICE_ROWS_BY_ORIENTATION.landscape;
+  }
+
+  function syncManagedDefaultRows(nextOrientation) {
+    if (!defaultRowCountManaged) return;
+    var currentRows = Array.prototype.slice.call(rowsBody.querySelectorAll("tr"));
+    var expectedCurrentCount = defaultInvoiceRowCount(currentOrientation());
+    if (currentRows.length !== expectedCurrentCount || currentRows.some(function (tr) { return !rowIsBlank(tr); })) {
+      defaultRowCountManaged = false;
+      return;
+    }
+    var targetCount = defaultInvoiceRowCount(nextOrientation);
+    while (currentRows.length < targetCount) {
+      createRow({}, { skipRecalc: true });
+      currentRows.push(rowsBody.lastElementChild);
+    }
+    while (currentRows.length > targetCount) {
+      currentRows.pop().remove();
+    }
+  }
+
   // ---------- Path helpers ----------
 
   function getPath(obj, path) {
@@ -1286,6 +1313,7 @@
       // row/summary figures and the amount-words emptiness — so skip the
       // full static-field refit on every keystroke here.
       input.addEventListener("input", function () {
+        defaultRowCountManaged = false;
         livePersianizeDigits(input);
         if (input.classList.contains("cell-textarea")) autoGrowTextarea(input);
         recalcAll({ skipStaticFit: true });
@@ -1314,6 +1342,7 @@
         var confirmed = await confirmApp("حذف قلم", "این قلم از پیش‌فاکتور حذف شود؟", "حذف", true);
         if (!confirmed) return;
       }
+      defaultRowCountManaged = false;
       tr.remove();
       recalcAll();
       isDirty = true;
@@ -1333,6 +1362,7 @@
   }
 
   function addRow() {
+    defaultRowCountManaged = false;
     createRow({}, { focusField: "description" });
     isDirty = true;
     setStatus("تغییرات ذخیره‌نشده");
@@ -1749,7 +1779,8 @@
     return data;
   }
 
-  function applyInvoiceData(raw) {
+  function applyInvoiceData(raw, options) {
+    defaultRowCountManaged = !!(options && options.manageDefaultRows);
     var profileKey = (raw && raw.company && raw.company.profile) || DEFAULT_PROFILE_KEY;
     if (!COMPANY_PROFILES[profileKey]) profileKey = registerEmbeddedProfile(profileKey, raw && raw.company);
     if (!COMPANY_PROFILES[profileKey]) profileKey = DEFAULT_PROFILE_KEY;
@@ -1769,8 +1800,9 @@
     var sellerData = Object.assign({}, sellerDefaults, raw && raw.seller);
     if (!companyData.name) companyData.name = sellerData.name || "";
     if (!sellerData.name) sellerData.name = companyData.name || "";
+    var dataOrientation = (raw && raw.orientation) || defaults.orientation;
     var data = {
-      orientation: (raw && raw.orientation) || defaults.orientation,
+      orientation: dataOrientation,
       headerGray: raw && raw.headerGray != null ? !!raw.headerGray : defaults.headerGray,
       font: DEFAULT_FONT_KEY,
       fontScale: DEFAULT_FONT_SCALE,
@@ -1781,7 +1813,9 @@
       taxPercent: raw && raw.taxPercent != null ? raw.taxPercent : defaults.taxPercent,
       notes: raw && raw.notes != null ? raw.notes : defaults.notes,
       includeStamp: raw && raw.includeStamp != null ? !!raw.includeStamp : defaults.includeStamp,
-      items: raw && Array.isArray(raw.items) ? raw.items.slice() : defaults.items,
+      items: raw && Array.isArray(raw.items)
+        ? raw.items.slice()
+        : makeBlankRows(defaultInvoiceRowCount(dataOrientation)),
     };
 
     document.querySelectorAll("[data-field]").forEach(function (el) {
@@ -2101,6 +2135,7 @@
       validityIsAutoSuggested = false;
       currentSavedName = name;
       isDirty = false;
+      defaultRowCountManaged = false;
       renderSavedList();
       setStatus("ذخیره شد — ساعت " + nowLabel());
       return true;
@@ -2715,7 +2750,7 @@
         var confirmed = await confirmApp("پیش‌فاکتور جدید", "تغییرات ذخیره‌نشده از بین می‌رود. یک سند جدید ایجاد شود؟", "ایجاد سند جدید");
         if (!confirmed) return;
       }
-      applyInvoiceData(blankInvoice());
+      applyInvoiceData(blankInvoice(), { manageDefaultRows: true });
       currentSavedId = null;
       currentSavedName = "";
       isDirty = false;
@@ -2884,6 +2919,7 @@
 
     document.getElementById("orientation-landscape").addEventListener("change", function () {
       if (!this.checked) return;
+      syncManagedDefaultRows("landscape");
       setOrientation("landscape");
       recalcAll();
       isDirty = true;
@@ -2891,6 +2927,7 @@
     });
     document.getElementById("orientation-portrait").addEventListener("change", function () {
       if (!this.checked) return;
+      syncManagedDefaultRows("portrait");
       setOrientation("portrait");
       recalcAll();
       isDirty = true;
@@ -2974,7 +3011,7 @@
     // Every load starts a clean blank invoice — nothing is auto-restored.
     // Previously-saved invoices stay reachable from the "ذخیره‌شده‌ها" panel
     // (see openSavedEntry above), they just aren't loaded automatically.
-    applyInvoiceData(blankInvoice());
+    applyInvoiceData(blankInvoice(), { manageDefaultRows: true });
     currentSavedId = null;
     currentSavedName = "";
     numberIsAutoSuggested = true;

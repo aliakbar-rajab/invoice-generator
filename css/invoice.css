@@ -444,30 +444,83 @@ body {
   letter-spacing: 0.02em;
 }
 
-/* Date / invoice-number block, at the band's far end. Two-column grid so
-   both rows' labels and values line up in shared columns. */
+/* Date / invoice-number block, at the band's far end: three pill-shaped
+   rows, each a self-contained chip (per the reference mockup) rather than
+   plain text. Each pill has a fixed width and space-between's the label
+   (right, muted, small) against the value (left, bold, large) — so every
+   row anchors to the SAME two edges regardless of how long its own label
+   or value happens to be. That sidesteps the failure mode a shared grid
+   column had: a short label ("تاریخ") no longer leaves a random gap and a
+   long one ("شماره پیش‌فاکتور") no longer crowds its value, because
+   neither one is measured against the other row's content anymore. */
 .inv-meta {
   justify-self: end;
-  display: grid;
-  grid-template-columns: auto auto;
-  justify-content: end;
-  align-items: baseline;
-  gap: 1.4mm 2mm;
-  font-size: calc(8.2pt * var(--doc-font-scale));
+  display: flex;
+  flex-direction: column;
+  gap: 1mm;
+  width: 68mm;
 }
 
-.inv-meta div {
-  display: contents;
+.inv-meta > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2mm;
+  background: var(--pay-fill);
+  border-radius: 1.6mm;
+  padding: 0.8mm 2.5mm;
 }
 
 .inv-meta dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.2mm;
   white-space: nowrap;
-  color: var(--band-muted);
+  /* The plain --muted gray this inherits everywhere else sits on white;
+     here it sits on the pill's own light-gray fill, and the two together
+     read as washed out. --muted-strong (used elsewhere for exactly this —
+     secondary text that still has to stay legible) keeps it readable. */
+  color: var(--muted-strong);
+  font-size: calc(7.4pt * var(--doc-font-scale));
 }
 
+.inv-meta-icon,
+.inv-card-head-icon {
+  flex: none;
+  width: 3.4mm;
+  height: 3.4mm;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Same size as every other "field value" in this document
+   (.inv-field-value.inv-input, the seller/buyer cards below) — 9.2pt —
+   instead of an invented larger one. That first larger size (11.5pt) was
+   never on this document's actual type scale (label tiers run ~7.4pt,
+   value tiers ~8.7-9.2pt, headline tiers 12.5pt+); at that odd in-between
+   size it read as a different font entirely, which is what made a
+   pre-existing, otherwise-invisible issue show up: the offline Vazirmatn
+   subset has no "/" or "-" glyphs, so the browser has always substituted
+   Tahoma for punctuation in every date on this page — it's just imperceptible
+   at the sizes this document normally uses. Regular weight (that same
+   field-value pattern elsewhere uses 700, but explicitly not wanted here).
+   Left-aligned (not end/right) so all three numbers start at the same pixel
+   on every row and read as one neat column, regardless of how long each one
+   happens to be. Width is sized to the longest value actually printed here
+   (an 8-digit-date + 3-digit-sequence invoice number, measured against the
+   real DOM at THIS font-size — canvas text measurement undercounts this
+   font, don't re-derive it from that). A number past 999/day is the only
+   thing that still overflows; fitNumericEl (app.js) shrinks its font before
+   that can clip. */
 .inv-meta .inv-input {
-  width: 27mm;
-  text-align: end;
+  width: 34mm;
+  text-align: left;
+  font-size: calc(9.2pt * var(--doc-font-scale));
+  font-weight: 400;
+  color: var(--ink);
 }
 
 .inv-meta-validity dd {
@@ -526,13 +579,7 @@ body {
   letter-spacing: 0.01em;
 }
 
-.inv-card-head-mark {
-  flex: none;
-  width: 2mm;
-  height: 2.6mm;
-  border-radius: 0.5mm;
-  background: var(--accent-grad);
-}
+.inv-card-head-icon { color: var(--accent-2); }
 
 .inv-card-grid {
   display: grid;
@@ -550,6 +597,10 @@ body {
 
 .inv-field-wide {
   grid-column: 1 / -1;
+}
+
+.inv-field-postal {
+  padding-block-start: 0.15mm;
 }
 
 .inv-field-label {
