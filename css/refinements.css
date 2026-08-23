@@ -172,21 +172,24 @@ body,
 }
 .invoice-sheet.stamp-enabled .inv-stamp-draft-note { display: none; }
 
-/* Validation is explicit and local. Invalid financial data is never hidden by
-   a plausible-looking total. */
+/* Output warnings are advisory and stay in the application chrome. They are
+   never cloned into, or allowed to block, the printed document. */
 .invoice-validation {
-  margin-bottom: 2mm;
-  padding: 7px 10px;
-  border: 1px solid #cf6a73;
-  border-radius: 5px;
-  background: #fff3f4;
-  color: #8d202a;
+  width: min(calc(100% - 32px), 1120px);
+  box-sizing: border-box;
+  margin: 14px auto -12px;
+  padding: 10px 14px;
+  border: 1px solid #d6aa5f;
+  border-radius: 8px;
+  background: #fff8e9;
+  color: #6d4a12;
   font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
-  font-size: 11px;
+  font-size: 12px;
+  box-shadow: 0 2px 8px rgb(74 50 12 / 8%);
 }
 .invoice-validation[hidden] { display: none; }
 .invoice-validation strong { display: block; }
-.invoice-validation ul { margin: 3px 0 0; padding-inline-start: 18px; }
+.invoice-validation ul { margin: 4px 0 0; padding-inline-start: 20px; }
 
 .inv-table td.has-error,
 .inv-field.has-error { position: relative; background: #fff1f2 !important; }

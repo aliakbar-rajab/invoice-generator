@@ -1418,10 +1418,19 @@
 
   function requireField(selector, message, errors) {
     var input = document.querySelector(selector);
-    if (input && !input.value.trim()) {
-      setInlineError(input, message, true);
-      errors.push(message);
-    }
+    if (input && !input.value.trim()) errors.push(message);
+  }
+
+  function renderOutputWarnings(warnings) {
+    var unique = warnings.filter(function (text, index) { return warnings.indexOf(text) === index; });
+    validationListEl.innerHTML = "";
+    unique.forEach(function (text) {
+      var li = document.createElement("li");
+      li.textContent = text;
+      validationListEl.appendChild(li);
+    });
+    validationEl.hidden = unique.length === 0;
+    return unique;
   }
 
   function validateInvoiceForOutput() {
@@ -1431,10 +1440,8 @@
     var errors = calculationErrors.slice();
     requireField('[data-field="meta.date"]', "تاریخ پیش‌فاکتور وارد نشده است", errors);
     requireField('[data-field="meta.number"]', "شماره پیش‌فاکتور وارد نشده است", errors);
+    requireField('[data-field="seller.name"]', "نام فروشنده وارد نشده است", errors);
     requireField('[data-field="buyer.name"]', "نام خریدار وارد نشده است", errors);
-    if (isCustomProfile(profileSelectEl.value) && !customCompanyNameEl.value.trim()) {
-      errors.push("نام شرکت صادرکننده را وارد کنید");
-    }
     if (!Array.prototype.some.call(rowsBody.querySelectorAll("tr"), function (tr) { return !rowIsBlank(tr); })) {
       errors.push("حداقل یک قلم کالا یا خدمت وارد کنید");
     }
@@ -1442,16 +1449,7 @@
       requireField('[data-field="meta.validity"]', "تاریخ اعتبار پیش‌فاکتور وارد نشده است", errors);
     }
 
-    var unique = errors.filter(function (text, index) { return errors.indexOf(text) === index; });
-    validationListEl.innerHTML = "";
-    unique.forEach(function (text) {
-      var li = document.createElement("li");
-      li.textContent = text;
-      validationListEl.appendChild(li);
-    });
-    validationEl.hidden = unique.length === 0;
-    if (unique.length) validationEl.scrollIntoView({ behavior: "smooth", block: "center" });
-    return unique;
+    return renderOutputWarnings(errors);
   }
 
   function setTotal(key, text) {
@@ -2305,95 +2303,39 @@
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     refreshLiveInvoiceNumber();
     recalcAll();
-    var errors = validateInvoiceForOutput();
-    if (errors.length) {
-      await showAppDialog({
-        title: "پیش‌فاکتور آمادهٔ چاپ نیست",
-        message: "برای جلوگیری از صدور سند نادرست، موارد زیر را اصلاح کنید.",
-        details: errors.slice(0, 8),
-        actions: [{ id: "ok", label: "بازگشت و اصلاح", primary: true }],
-      });
-      return;
-    }
+    var warnings = validateInvoiceForOutput();
 
     if (document.fonts && document.fonts.ready) await document.fonts.ready;
     autoGrowTextareas();
     var rows = printableSourceRows();
     var orientation = currentOrientation();
 
-    // Portrait columns are intentionally narrower. For legitimate very large
-    // amounts, preserve readable type by moving to landscape rather than
-    // squeezing digits below the approved minimum.
+    // Portrait columns are intentionally narrower. Switch automatically when
+    // necessary; printing must never wait for an application dialog.
     if (orientation === "portrait" && sheet.querySelector(".inv-table .numeric-overflow, .inv-totals .numeric-overflow")) {
-      var widthChoice = await showAppDialog({
-        title: "مبالغ برای حالت عمودی عریض هستند",
-        message: "برای حفظ خوانایی کامل ارقام، این سند در حالت افقی چاپ شود. در صورت نیاز، صفحه‌بندی چندصفحه‌ای به‌طور خودکار انجام می‌شود.",
-        actions: [
-          { id: "landscape", label: "تغییر به افقی", primary: true },
-          { id: "cancel", label: "انصراف" },
-        ],
-      });
-      if (widthChoice.action !== "landscape") return;
       setOrientation("landscape");
       recalcAll();
       orientation = "landscape";
       isDirty = true;
-      setStatus("جهت سند برای خوانایی مبالغ به افقی تغییر کرد.");
+      warnings.push("برای خوانایی مبالغ، جهت چاپ به‌صورت خودکار افقی شد");
     }
     if (sheet.querySelector(".inv-table .numeric-overflow, .inv-totals .numeric-overflow")) {
-      await showAppDialog({
-        title: "مبلغ بسیار طولانی است",
-        message: "حداقل یکی از مبالغ در عرض استاندارد ستون جا نمی‌گیرد. مقدار را بررسی کنید؛ برنامه برای جا دادن عدد، متن را به اندازهٔ ناخوانا کوچک نمی‌کند.",
-        actions: [{ id: "ok", label: "بازگشت و بررسی", primary: true }],
-      });
-      return;
-    }
-
-    // Landscape is preferred for ordinary invoices, but portrait often keeps
-    // 9–17 items on one page. Offer that improvement before creating a
-    // multi-page landscape document.
-    if (orientation === "landscape" && !singlePageFits(rows, "landscape", true) && singlePageFits(rows, "portrait", true)) {
-      var choice = await showAppDialog({
-        title: "چیدمان بهتر برای این سند",
-        message: "این تعداد قلم در حالت افقی به بیش از یک صفحه نیاز دارد، اما در حالت عمودی روی یک A4 جا می‌گیرد.",
-        actions: [
-          { id: "portrait", label: "تغییر به عمودی و چاپ", primary: true },
-          { id: "multi", label: "چاپ چندصفحه‌ای افقی" },
-          { id: "cancel", label: "انصراف" },
-        ],
-      });
-      if (choice.action === "cancel") return;
-      if (choice.action === "portrait") {
-        setOrientation("portrait");
-        orientation = "portrait";
-        isDirty = true;
-        setStatus("جهت سند برای چاپ یک‌صفحه‌ای به عمودی تغییر کرد.");
-      }
+      warnings.push("حداقل یکی از مبالغ بسیار طولانی است؛ مقدار آن را بررسی کنید");
     }
 
     var plan = buildPrintPlan(rows, orientation);
     if (plan.overflowRowIndex != null) {
-      var overflowMessage = plan.overflowKind === "final-page"
-        ? "بخش پایانی سند یا ردیف " + toPersianDigits(plan.overflowRowIndex + 1) + " در فضای چاپی A4 جا نمی‌گیرد. توضیحات پایانی یا شرح آن ردیف را کوتاه‌تر کنید."
-        : "ردیف " + toPersianDigits(plan.overflowRowIndex + 1) + " حتی به‌تنهایی در فضای چاپی A4 جا نمی‌گیرد. شرح این ردیف را کوتاه‌تر یا بین چند قلم تقسیم کنید.";
-      await showAppDialog({
-        title: "محتوای سند برای یک صفحه بیش از حد بلند است",
-        message: overflowMessage + " برنامه برای جلوگیری از بریده‌شدن متن، چاپ را متوقف کرد.",
-        actions: [{ id: "ok", label: "بازگشت و اصلاح", primary: true }],
-      });
-      return;
+      // Last-resort pagination: keep every row printable and put the totals on
+      // their own final page instead of blocking on unusually tall content.
+      plan = {
+        compact: true,
+        chunks: rows.map(function (row) { return [row]; }).concat([[]]),
+        orientation: orientation,
+      };
+      warnings.push("محتوای بسیار بلند برای جلوگیری از حذف اطلاعات در چند صفحه تقسیم شد");
     }
-    if (plan.chunks.length > 1) {
-      var confirmed = await showAppDialog({
-        title: "چاپ چندصفحه‌ای",
-        message: "این پیش‌فاکتور در " + toPersianDigits(plan.chunks.length) + " صفحه چاپ می‌شود. سربرگ ادامه در هر صفحه تکرار و جمع نهایی فقط در صفحهٔ آخر درج خواهد شد.",
-        actions: [
-          { id: "print", label: "چاپ " + toPersianDigits(plan.chunks.length) + " صفحه", primary: true },
-          { id: "cancel", label: "انصراف" },
-        ],
-      });
-      if (confirmed.action !== "print") return;
-    }
+    if (plan.chunks.length > 1) warnings.push("این پیش‌فاکتور در " + toPersianDigits(plan.chunks.length) + " صفحه چاپ می‌شود");
+    renderOutputWarnings(warnings);
 
     renderPrintPlan(plan);
     var data = collectInvoiceData();
@@ -2624,18 +2566,7 @@
         setStatus("مهر از نسخهٔ چاپی حذف شد.");
         return;
       }
-      var errors = validateInvoiceForOutput();
-      if (errors.length) {
-        this.checked = false;
-        stampRequested = false;
-        await showAppDialog({
-          title: "سند هنوز نهایی نیست",
-          message: "قبل از درج مهر، اطلاعات ضروری و مبالغ را تکمیل کنید.",
-          details: errors.slice(0, 8),
-          actions: [{ id: "ok", label: "بازگشت و اصلاح", primary: true }],
-        });
-        return;
-      }
+      validateInvoiceForOutput();
       var confirmed = await confirmApp("درج مهر شرکت", "این گزینه سند را به‌عنوان نسخهٔ نهایی علامت می‌زند و مهر شرکت انتخاب‌شده را در چاپ قرار می‌دهد.", "تأیید و درج مهر");
       stampRequested = confirmed;
       this.checked = confirmed;
@@ -2755,10 +2686,7 @@
     sheet.addEventListener("input", function () {
       var stampWasRemoved = invalidateFinalization();
       isDirty = true;
-      if (validationRequested) {
-        validationRequested = false;
-        validationEl.hidden = true;
-      }
+      if (validationRequested) validateInvoiceForOutput();
       setStatus(stampWasRemoved ? "سند تغییر کرد؛ مهر نهایی برداشته شد." : "تغییرات ذخیره‌نشده");
     });
   }

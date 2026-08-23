@@ -118,7 +118,7 @@
           </div>
           <label class="stamp-finalize-control">
             <input type="checkbox" id="include-stamp" />
-            <span><strong>نسخهٔ نهایی با مهر شرکت</strong><small>مهر فقط پس از تکمیل و تأیید سند چاپ می‌شود.</small></span>
+            <span><strong>نسخهٔ نهایی با مهر شرکت</strong><small>در صورت فعال‌سازی، مهر شرکت در نسخهٔ چاپی قرار می‌گیرد.</small></span>
           </label>
           <div class="settings-file-actions">
             <button type="button" id="btn-open" class="settings-action"><span>باز کردن فایل</span></button>
@@ -143,6 +143,11 @@
       <button type="button" id="btn-zoom-in" hidden></button>
     </div>
   </header>
+
+  <div class="invoice-validation no-print" id="invoice-validation" hidden role="status" aria-live="polite">
+    <strong>نکات پیش از چاپ</strong>
+    <ul id="invoice-validation-list"></ul>
+  </div>
 
   <main class="sheet-viewport">
     <div class="sheet-scale-wrapper" id="sheet-scale-wrapper">
@@ -237,11 +242,6 @@
           </div>
         </div>
       </section>
-
-      <div class="invoice-validation no-print" id="invoice-validation" hidden role="alert">
-        <strong>لطفاً موارد مشخص‌شده را اصلاح کنید.</strong>
-        <ul id="invoice-validation-list"></ul>
-      </div>
 
       <div class="inv-table-frame">
       <table class="inv-table">
