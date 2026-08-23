@@ -200,6 +200,7 @@
   var companyEditorDescriptionEl = document.getElementById("company-editor-description");
   var companyEditorSubmitEl = document.getElementById("btn-company-editor-submit");
   var companyEditorResetEl = document.getElementById("btn-company-editor-reset");
+  var companyEditorDeleteEl = document.getElementById("btn-company-editor-delete");
   var companyEditorNameEl = document.getElementById("company-editor-name");
   var companyEditorNationalIdEl = document.getElementById("company-editor-national-id");
   var companyEditorPostalCodeEl = document.getElementById("company-editor-postal-code");
@@ -370,10 +371,19 @@
     localStorage.setItem(CUSTOM_PROFILES_KEY, JSON.stringify(stored));
   }
 
+  // An empty asset is the absence of an override, not an override to nothing:
+  // hydrateCompanyProfiles only applies truthy values, so a stored "" was a
+  // record that changed nothing on reload yet still made
+  // hasBuiltInProfileOverride report the profile as edited (enabling
+  // «بازگردانی به پیش‌فرض» with nothing to undo). Storing one now removes the
+  // key instead, keeping the record and what it means in agreement.
   function persistProfileAsset(profileKey, assetName, dataUrl) {
     var overrides = readStoredObject(PROFILE_ASSETS_KEY);
-    if (!overrides[profileKey]) overrides[profileKey] = {};
-    overrides[profileKey][assetName] = dataUrl;
+    var entry = overrides[profileKey] && typeof overrides[profileKey] === "object" ? overrides[profileKey] : {};
+    if (dataUrl) entry[assetName] = String(dataUrl);
+    else delete entry[assetName];
+    if (Object.keys(entry).length) overrides[profileKey] = entry;
+    else delete overrides[profileKey];
     localStorage.setItem(PROFILE_ASSETS_KEY, JSON.stringify(overrides));
   }
 
@@ -465,6 +475,62 @@
 
     COMPANY_PROFILES[profileKey] = Object.assign({}, pristine);
     renderCompanyProfileOptions(profileKey);
+    return "";
+  }
+
+  // Removes a user-created company. Shipped profiles are not eligible (they
+  // have «بازگردانی به پیش‌فرض» instead) and neither is the document-scoped
+  // «سایر». Without this there was no way at all to get rid of a company —
+  // including one that registerEmbeddedProfile added silently just because a
+  // colleague's backup file was opened once.
+  //
+  // Saved invoices are deliberately left alone: they carry their own company
+  // details, and renderSavedList now shows those (see the entryCompany
+  // fallback) instead of masquerading as the default company.
+  //
+  // Returns "" on success, otherwise a reason the caller turns into a message.
+  function deleteUserProfile(profileKey) {
+    var profile = COMPANY_PROFILES[profileKey];
+    if (!profile || !profile.userCreated || isCustomProfile(profileKey) || BUILT_IN_PROFILE_DEFAULTS[profileKey]) {
+      return "ineligible";
+    }
+    var previousRaw;
+    try {
+      previousRaw = localStorage.getItem(CUSTOM_PROFILES_KEY);
+    } catch (err) {
+      return "write";
+    }
+    delete COMPANY_PROFILES[profileKey];
+    try {
+      persistUserProfiles();
+    } catch (err) {
+      // Put the profile back in memory AND restore the previous bytes, so a
+      // failed delete leaves nothing half-removed on this load or the next.
+      COMPANY_PROFILES[profileKey] = profile;
+      try {
+        if (previousRaw === null) localStorage.removeItem(CUSTOM_PROFILES_KEY);
+        else localStorage.setItem(CUSTOM_PROFILES_KEY, previousRaw);
+      } catch (rollbackErr) {
+        // Storage is refusing writes entirely; nothing further can be done.
+      }
+      return "write";
+    }
+    // Side records only. The company is already gone by this point, so a
+    // failure here must not undo the deletion — it just leaves dead keys.
+    try {
+      localStorage.removeItem(SEQ_KEY_PREFIX + profileKey);
+    } catch (err) {
+      /* numbering leftovers are harmless */
+    }
+    try {
+      var assets = readStoredObject(PROFILE_ASSETS_KEY);
+      if (Object.prototype.hasOwnProperty.call(assets, profileKey)) {
+        delete assets[profileKey];
+        localStorage.setItem(PROFILE_ASSETS_KEY, JSON.stringify(assets));
+      }
+    } catch (err) {
+      /* asset leftovers are harmless */
+    }
     return "";
   }
 
@@ -569,20 +635,62 @@
     }
   }
 
-  // Reads whatever's actually in the تاریخ field — "1405/06/01", "1405-06-01"
-  // and "14050601" (no separator at all) all land here, since this only cares
-  // about the 8 digits underneath: 4-digit year + 2-digit month + 2-digit day.
-  // Reuses invoiceDateDigits (below) rather than a second ad-hoc regex, so the
-  // two places in this file that need "whatever format, just give me the
-  // digits" can't quietly drift apart.
-  function parseJalaliDateField(value) {
-    var digits = invoiceDateDigits(value);
-    if (!digits) return null;
-    var y = parseInt(digits.slice(0, 4), 10);
-    var m = parseInt(digits.slice(4, 6), 10);
-    var d = parseInt(digits.slice(6, 8), 10);
-    if (m < 1 || m > 12 || d < 1 || d > 31) return null;
-    return { y: y, m: m, d: d };
+  // Whether this browser can both PRODUCE and READ BACK a canonical Jalali
+  // date. Both halves matter: readInvoiceDate needs the zero-padded 8-digit
+  // shape ("۱۴۰۵/۰۶/۰۱") to parse at all, and jalaliPartsToGregorianDate needs
+  // the Persian calendar to decide whether a date exists. An ICU build that
+  // ignored `2-digit` would make even todayJalaliString()'s own output
+  // unparseable — and the app would then brand every real date impossible.
+  // Probing the round trip, rather than just the formatter, is what keeps an
+  // environment limitation from turning into a false accusation.
+  var jalaliCalendarAvailable = (function () {
+    try {
+      var today = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+      return !!invoiceDateDigits(today);
+    } catch (err) {
+      return false;
+    }
+  })();
+
+  // Tri-state read of whatever's actually in the تاریخ field — "1405/06/01",
+  // "1405-06-01" and "14050601" (no separator at all) all land here, since
+  // this only cares about the 8 digits underneath: 4-digit year + 2-digit
+  // month + 2-digit day. Reuses invoiceDateDigits (below) rather than a second
+  // ad-hoc regex, so the two places in this file that need "whatever format,
+  // just give me the digits" can't quietly drift apart.
+  //
+  //   { kind: "empty" }    nothing typed — there is no reference date at all
+  //   { kind: "invalid" }  text is present but is not a real Jalali date
+  //   { kind: "valid", parts: {y,m,d} }
+  //
+  // "invalid" deliberately covers calendar impossibility as well as syntax:
+  // ۱۴۰۴/۱۲/۳۰ parses as three numbers, but Esfand has 29 days outside a leap
+  // year and 1404 is not one. Confirming that through the browser's own
+  // Persian calendar (what jalaliPartsToGregorianDate already does) beats
+  // reimplementing the leap rule — a Jalali date with no Gregorian
+  // counterpart does not exist.
+  function readInvoiceDate(value) {
+    var text = String(value == null ? "" : value).trim();
+    if (!text) return { kind: "empty", parts: null };
+    var digits = invoiceDateDigits(text);
+    var y = digits ? parseInt(digits.slice(0, 4), 10) : 0;
+    var m = digits ? parseInt(digits.slice(4, 6), 10) : 0;
+    var d = digits ? parseInt(digits.slice(6, 8), 10) : 0;
+    var wellFormed = !!digits && !!y && m >= 1 && m <= 12 && d >= 1 && d <= 31;
+    if (!jalaliCalendarAvailable) {
+      // Nothing here can be verified, so nothing may be accused. Falling back
+      // to "empty" for unparseable text reproduces exactly what the app did
+      // before impossible-date detection existed, rather than inventing a
+      // verdict this environment has no way to support.
+      return wellFormed ? { kind: "valid", parts: { y: y, m: m, d: d } } : { kind: "empty", parts: null };
+    }
+    if (!wellFormed) return { kind: "invalid", parts: null };
+    if (!jalaliPartsToGregorianDate(y, m, d)) return { kind: "invalid", parts: null };
+    return { kind: "valid", parts: { y: y, m: m, d: d } };
   }
 
   function formatJalaliYmd(y, m, d) {
@@ -600,15 +708,28 @@
   // for the one whose Persian-calendar formatting matches {y,m,d} exactly.
   // Ten days comfortably covers the seed's worst-case drift (the seed assumes
   // every month is 30 days; real months run 29-31).
+  //
+  // Answers are cached: the search costs up to 21 Intl.formatToParts calls,
+  // and readInvoiceDate now runs it from recalcAll — i.e. on every keystroke.
+  var jalaliGregorianCache = {};
+  var JALALI_CACHE_LIMIT = 400;
+
   function jalaliPartsToGregorianDate(y, m, d) {
+    var cacheKey = y + "/" + m + "/" + d;
+    if (Object.prototype.hasOwnProperty.call(jalaliGregorianCache, cacheKey)) {
+      var hit = jalaliGregorianCache[cacheKey];
+      // A fresh Date every time: callers advance the result by a day.
+      return hit === null ? null : new Date(hit);
+    }
     var monthLenEstimate = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 30];
     var dayOfYear = d;
     for (var i = 0; i < m - 1; i += 1) dayOfYear += monthLenEstimate[i];
     var seed = new Date(y + 621, 2, 21);
     seed.setDate(seed.getDate() + dayOfYear - 1);
+    var found = null;
     try {
       var fmt = new Intl.DateTimeFormat("fa-IR-u-ca-persian", { year: "numeric", month: "2-digit", day: "2-digit" });
-      for (var offset = -10; offset <= 10; offset += 1) {
+      for (var offset = -10; offset <= 10 && !found; offset += 1) {
         var candidate = new Date(seed);
         candidate.setDate(candidate.getDate() + offset);
         var parts = fmt.formatToParts(candidate);
@@ -619,12 +740,16 @@
           else if (part.type === "month") pm = n;
           else if (part.type === "day") pd = n;
         });
-        if (py === y && pm === m && pd === d) return candidate;
+        if (py === y && pm === m && pd === d) found = candidate;
       }
     } catch (err) {
+      // Missing Persian-calendar support is a fact about the browser, not
+      // about this date, so it is deliberately not cached as "impossible".
       return null;
     }
-    return null;
+    if (Object.keys(jalaliGregorianCache).length >= JALALI_CACHE_LIMIT) jalaliGregorianCache = {};
+    jalaliGregorianCache[cacheKey] = found === null ? null : found.getTime();
+    return found === null ? null : new Date(found);
   }
 
   // Resolves a validity mode (see VALID_VALIDITY_MODES) to the text that
@@ -639,7 +764,14 @@
   // so this doesn't read the field of whatever document is still on screen.
   function resolveValidityValue(mode, dateFieldValue) {
     if (mode === "manual") return "";
-    var reference = parseJalaliDateField(dateFieldValue !== undefined ? dateFieldValue : currentInvoiceDateValue());
+    var read = readInvoiceDate(dateFieldValue !== undefined ? dateFieldValue : currentInvoiceDateValue());
+    // An impossible or garbled تاریخ has no "end of day" and no "next day".
+    // This used to fall through to the REAL-WORLD today/tomorrow, so a
+    // document dated ۱۴۰۴/۱۲/۳۰ printed a validity six months away that read
+    // as authoritative. Leave the field blank instead — recalcAll reports the
+    // date itself as invalid, which is the thing the user has to fix.
+    if (read.kind === "invalid") return "";
+    var reference = read.parts;
     if (mode === "tomorrow") {
       if (reference) {
         var greg = jalaliPartsToGregorianDate(reference.y, reference.m, reference.d);
@@ -654,10 +786,15 @@
             }).format(next);
             if (formatted) return formatted;
           } catch (err) {
-            // fall through to the real-world fallback below
+            // fall through to the blank below
           }
         }
+        // A date this browser cannot advance is a browser limitation, and
+        // still must not silently become the real-world tomorrow of an
+        // unrelated day.
+        return "";
       }
+      // kind === "empty": no reference date exists to be relative to.
       return tomorrowJalaliString();
     }
     if (reference) return formatJalaliYmd(reference.y, reference.m, reference.d);
@@ -1148,6 +1285,11 @@
       companyEditorResetEl.hidden = !resettable;
       companyEditorResetEl.disabled = resettable && !hasBuiltInProfileOverride(selectedKey);
     }
+    // The mirror image for user-created companies, which have no shipped
+    // defaults to fall back to and so can only be removed outright.
+    if (companyEditorDeleteEl) {
+      companyEditorDeleteEl.hidden = !(editingExisting && !!profile.userCreated && !BUILT_IN_PROFILE_DEFAULTS[selectedKey]);
+    }
     closeSettingsPanel();
     companyEditorDialogEl.hidden = false;
   }
@@ -1168,7 +1310,10 @@
     var previousProfile = editingExisting ? Object.assign({}, COMPANY_PROFILES[profileKey]) : null;
     var profile = profileFromCompanyData({
       name: name,
-      logo: pendingCompanyLogoData,
+      // The editor has no "remove logo" control, so an empty pending logo can
+      // only mean "the user did not pick a new one" — never "delete the one
+      // this company already has".
+      logo: pendingCompanyLogoData || (editingExisting ? previousProfile.logo : ""),
       stamp: editingExisting ? previousProfile.stamp : "",
       nationalId: toPersianDigits(companyEditorNationalIdEl.value.trim()),
       address: companyEditorAddressEl.value.trim(),
@@ -1180,8 +1325,8 @@
     COMPANY_PROFILES[profileKey] = profile;
     try {
       persistProfileDetails(profileKey);
-      if (editingExisting && !profile.userCreated && pendingCompanyLogoData !== previousProfile.logo) {
-        persistProfileAsset(profileKey, "logo", pendingCompanyLogoData);
+      if (editingExisting && !profile.userCreated && profile.logo !== previousProfile.logo) {
+        persistProfileAsset(profileKey, "logo", profile.logo);
       }
     } catch (err) {
       if (previousProfile) COMPANY_PROFILES[profileKey] = previousProfile;
@@ -1443,7 +1588,7 @@
     } else {
       // Enter on the last row creates the next real editing row and keeps the
       // user in the same column.
-      createRow({}, { focusField: field });
+      appendEditingRow(field);
     }
   }
 
@@ -1531,17 +1676,34 @@
     return addedRow;
   }
 
-  function addRow() {
+  // Appending a row is a structural change to the document whichever control
+  // triggered it, so both entry points go through here: the orientation
+  // defaults stop applying and the document carries unsaved changes. Enter on
+  // the last row used to call createRow directly and skip all of that, so the
+  // extra row was neither protected by the unsaved-changes prompt nor enough
+  // to stop a later orientation switch from resetting the row count.
+  function appendEditingRow(focusField) {
     defaultRowCountManaged = false;
-    createRow({}, { focusField: "description" });
+    createRow({}, { focusField: focusField });
     isDirty = true;
     setStatus("تغییرات ذخیره‌نشده");
+  }
+
+  function addRow() {
+    appendEditingRow("description");
   }
 
   // ---------- Calculations and validation ----------
 
   var calculationErrors = [];
   var financialBlockingErrors = [];
+
+  // Both messages state the rule they actually enforce. The tax one used to
+  // read "between zero and one hundred", which said nothing about the
+  // two-decimal limit that strictPercent also applies — so a perfectly
+  // in-range 99.999 was rejected by a message insisting it was out of range.
+  var TAX_PERCENT_ERROR = "درصد مالیات باید عددی بین ۰ تا ۱۰۰ و حداکثر با دو رقم اعشار باشد";
+  var INVOICE_DATE_ERROR = "تاریخ پیش‌فاکتور یک تاریخ معتبر شمسی نیست (نمونه: ۱۴۰۴/۰۶/۳۱)";
 
   function rowIsBlank(tr) {
     return ROW_FIELDS.every(function (field) {
@@ -1550,15 +1712,48 @@
     });
   }
 
+  // An integer part is either bare digits, or 1-3 digits followed by complete
+  // 3-digit groups joined by ONE consistent separator — "1000", "1,000",
+  // "1٬000٬000", "1 000 000". Anything else that merely contains a separator
+  // is not a grouped number.
+  var STRICT_UNGROUPED_INT = /^\d+$/;
+  var STRICT_GROUPED_INT = /^\d{1,3}(?:([,٬\s])\d{3})(?:\1\d{3})*$/;
+
+  // Normalizes a user-typed numeric string to plain ASCII digits with a "."
+  // decimal point, or returns null when the text is not a well-formed number.
+  //
+  // Grouping separators are stripped only after the grouping they claim to
+  // express has been verified. Stripping "," / "٬" / spaces unconditionally
+  // (as this did) turned "1,5" into 15 — and a comma is exactly what many
+  // keyboards and locales produce for a DECIMAL point, so money, quantities
+  // and the tax rate were silently multiplied by ten with no warning, while
+  // the equivalent "1.5" was correctly rejected. The app's own formatted
+  // output ("۱٬۰۰۰٬۰۰۰", "۱٬۲۳۴٫۵۶۷") still round-trips unchanged.
+  //
+  // "" means genuinely empty; null means malformed. Callers must keep those
+  // apart: an empty discount or tax rate legitimately means zero, while a
+  // malformed one must never be quietly treated as one.
   function normalizeStrictNumber(value) {
-    return toAsciiDigits(String(value == null ? "" : value))
-      .trim()
-      .replace(/[٬,\s]/g, "")
-      .replace(/٫/g, ".");
+    var raw = toAsciiDigits(String(value == null ? "" : value)).trim().replace(/٫/g, ".");
+    if (!raw) return "";
+    var sign = "";
+    if (raw.charAt(0) === "-") {
+      sign = "-";
+      raw = raw.slice(1);
+    }
+    var pieces = raw.split(".");
+    if (pieces.length > 2) return null;
+    var intPart = pieces[0];
+    var fracPart = pieces.length > 1 ? pieces[1] : null;
+    if (!STRICT_UNGROUPED_INT.test(intPart) && !STRICT_GROUPED_INT.test(intPart)) return null;
+    // Grouping inside the fractional part is never meaningful ("1.0,5").
+    if (fracPart !== null && !/^\d*$/.test(fracPart)) return null;
+    return sign + intPart.replace(/[,٬\s]/g, "") + (fracPart === null ? "" : "." + fracPart);
   }
 
   function strictMoney(value, emptyAsZero) {
     var normalized = normalizeStrictNumber(value);
+    if (normalized === null) return { valid: false, calculable: false, value: 0n };
     if (!normalized && emptyAsZero) return { valid: true, calculable: true, value: 0n };
     if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, calculable: false, value: 0n };
     return {
@@ -1570,6 +1765,7 @@
 
   function strictQuantity(value) {
     var normalized = normalizeStrictNumber(value);
+    if (normalized === null) return { valid: false, calculable: false, value: 0n };
     if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, calculable: false, value: 0n };
     var parsed = parseQtyMilli(normalized);
     return {
@@ -1581,6 +1777,7 @@
 
   function strictPercent(value) {
     var normalized = normalizeStrictNumber(value);
+    if (normalized === null) return { valid: false, calculable: false, value: 0n };
     if (!normalized) return { valid: true, calculable: true, value: 0n };
     if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, calculable: false, value: 0n };
     var parsed = parsePercentBps(normalized);
@@ -1715,9 +1912,20 @@
     clearInlineError(taxPercentInput);
     var tax = strictPercent(taxPercentInput.value);
     if (!tax.valid) {
-      calculationErrors.push("درصد مالیات باید بین صفر تا صد باشد");
-      financialBlockingErrors.push("درصد مالیات باید بین صفر تا صد باشد");
+      calculationErrors.push(TAX_PERCENT_ERROR);
+      financialBlockingErrors.push(TAX_PERCENT_ERROR);
       setInlineError(taxPercentInput);
+    }
+
+    // The date is validated here rather than only in validateInvoiceForOutput
+    // so an impossible تاریخ is reported while it is being typed — it silently
+    // blanks the اعتبار field (see resolveValidityValue), and that missing
+    // value needs an explanation the moment it happens, not at print time.
+    var invoiceDateInput = document.querySelector('[data-field="meta.date"]');
+    clearInlineError(invoiceDateInput);
+    if (invoiceDateInput && readInvoiceDate(invoiceDateInput.value).kind === "invalid") {
+      calculationErrors.push(INVOICE_DATE_ERROR);
+      setInlineError(invoiceDateInput);
     }
 
     var usableTax = tax.valid ? tax.value : 0n;
@@ -1785,6 +1993,21 @@
     }
 
     return renderOutputWarnings(errors);
+  }
+
+  // Save and Print are the two authoritative actions: each commits the
+  // invoice number and each takes seconds of async work (a naming dialog, a
+  // font wait, a page-fitting pass). Only one may be in flight at a time.
+  //
+  // Ctrl+P while the save-naming dialog was open used to run a whole print —
+  // committing the number and consuming the sequence — behind the still-open
+  // modal, leaving the user looking at a prompt for a document that had
+  // already been finalized. A second Save while the first is still waiting is
+  // likewise ignored rather than stacked.
+  var authoritativeActionBusy = false;
+
+  function modalDialogIsOpen() {
+    return !appDialogEl.hidden || !companyEditorDialogEl.hidden;
   }
 
   function blockAuthoritativeAction(actionLabel) {
@@ -2224,9 +2447,18 @@
       timeEl.className = "saved-item-time";
       var entryNumber = entry.data && entry.data.meta && entry.data.meta.number ? entry.data.meta.number : "بدون شماره";
       var entryCompanyKey = entry.data && entry.data.company && entry.data.company.profile;
-      var entryCompany = isCustomProfile(entryCompanyKey) && entry.data.company.name
-        ? entry.data.company.name
-        : resolveProfile(entryCompanyKey).label;
+      var entryCompanyName = (entry.data && entry.data.company && entry.data.company.name) || "";
+      var entryProfile = COMPANY_PROFILES[entryCompanyKey];
+      // resolveProfile() falls back to DEFAULT_PROFILE_KEY, so an entry saved
+      // under a company this browser no longer has — a deleted profile, or one
+      // that only ever existed inside somebody else's backup file — was listed
+      // under «بنیان فولاد داریا», claiming an issuer it was never issued by.
+      // The entry carries its own company name; show that instead.
+      var entryCompany = isCustomProfile(entryCompanyKey) && entryCompanyName
+        ? entryCompanyName
+        : entryProfile
+          ? (entryProfile.label || entryProfile.name || "بدون نام")
+          : (entryCompanyName || "شرکت نامشخص");
       timeEl.textContent = entryNumber + " · " + entryCompany + " · " + formatSavedTime(entry.savedAt) + (entry.id === currentSavedId ? " — در حال ویرایش" : "");
       info.appendChild(nameEl);
       info.appendChild(timeEl);
@@ -2260,6 +2492,23 @@
   }
 
   async function saveCurrent(forceNew) {
+    // Save opens a modal of its own, so it must not start on top of one that
+    // is already asking something else — showAppDialog would settle the
+    // outstanding question as a cancel, silently abandoning (say) a delete
+    // confirmation the user was halfway through answering.
+    if (authoritativeActionBusy || modalDialogIsOpen()) {
+      setStatus("ذخیره انجام نشد؛ ابتدا پنجرهٔ باز را ببندید.");
+      return false;
+    }
+    authoritativeActionBusy = true;
+    try {
+      return await saveCurrentInner(forceNew);
+    } finally {
+      authoritativeActionBusy = false;
+    }
+  }
+
+  async function saveCurrentInner(forceNew) {
     refreshAutomaticTemporalFields(true);
     if (blockAuthoritativeAction("ذخیره")) return false;
     var list = loadSavedList();
@@ -2863,6 +3112,22 @@
   }
 
   async function printInvoice() {
+    // Unlike Save, Print never opens a dialog of its own, so an open modal
+    // means some other flow is mid-question and printing would answer it from
+    // underneath.
+    if (authoritativeActionBusy || modalDialogIsOpen()) {
+      setStatus("چاپ انجام نشد؛ ابتدا پنجرهٔ باز را ببندید.");
+      return false;
+    }
+    authoritativeActionBusy = true;
+    try {
+      return await printInvoiceInner();
+    } finally {
+      authoritativeActionBusy = false;
+    }
+  }
+
+  async function printInvoiceInner() {
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     refreshAutomaticTemporalFields(true);
     recalcAll();
@@ -3187,6 +3452,47 @@
         setStatus("مشخصات پیش‌فرض «" + pristine.label + "» بازگردانی شد.");
       });
     }
+    if (companyEditorDeleteEl) {
+      companyEditorDeleteEl.addEventListener("click", async function () {
+        var profileKey = companyEditorProfileKey;
+        var profile = profileKey && COMPANY_PROFILES[profileKey];
+        if (!profile || !profile.userCreated) return;
+        var wasSelected = profileSelectEl.value === profileKey;
+        // Same reason as the reset button: #app-dialog and
+        // #company-editor-dialog are separate backdrops and must not stack.
+        closeCompanyEditor();
+        var confirmed = await confirmApp(
+          "حذف شرکت",
+          "«" + (profile.label || profile.name) + "» از فهرست شرکت‌های این مرورگر حذف می‌شود. پیش‌فاکتورهای ذخیره‌شده حذف نمی‌شوند و مشخصات شرکتشان را حفظ می‌کنند.",
+          "حذف شرکت",
+          true
+        );
+        if (!confirmed) return;
+        var failure = deleteUserProfile(profileKey);
+        if (failure) {
+          setStatus(failure === "ineligible"
+            ? "این شرکت قابل حذف نیست."
+            : "حذف شرکت ممکن نشد؛ ذخیرهٔ مرورگر در دسترس نیست. چیزی تغییر نکرد.");
+          return;
+        }
+        renderCompanyProfileOptions(wasSelected ? DEFAULT_PROFILE_KEY : profileSelectEl.value);
+        if (wasSelected) {
+          // The open document was issued by the company that just went away;
+          // move it onto the default profile rather than leaving the sheet
+          // branded by something the app no longer knows about.
+          applyCompanyProfile(DEFAULT_PROFILE_KEY);
+          stampRequested = true;
+          syncStampVisibility();
+          if (numberIsAutoSuggested) {
+            var numberInput = document.querySelector('[data-field="meta.number"]');
+            if (numberInput) numberInput.value = suggestInvoiceNumber(DEFAULT_PROFILE_KEY, currentInvoiceDateValue());
+          }
+          isDirty = true;
+        }
+        renderSavedList();
+        setStatus("شرکت «" + (profile.label || profile.name) + "» حذف شد.");
+      });
+    }
     companyEditorDialogEl.addEventListener("click", function (e) {
       if (e.target === companyEditorDialogEl) closeCompanyEditor();
     });
@@ -3201,15 +3507,23 @@
       var file = this.files && this.files[0];
       this.value = "";
       if (!file) return;
+      // Captured before the "preparing" text replaces it, so a rejected file
+      // can put the editor back exactly as it was.
+      var previousLogoData = pendingCompanyLogoData;
+      var previousLogoLabel = companyLogoStatusEl.textContent;
       companyEditorErrorEl.hidden = true;
       companyLogoStatusEl.textContent = "در حال آماده‌سازی لوگو…";
       try {
         var dataUrl = await resizeImageFile(file, 720);
         setCompanyLogoPreview(dataUrl, file.name + " · بهینه‌شده برای چاپ");
       } catch (err) {
+        // Picking an unusable file must change nothing. This used to clear the
+        // preview, which set pendingCompanyLogoData to "" — so afterwards
+        // saving an unrelated edit (a corrected address, say) silently dropped
+        // the company's logo, something the user never asked for.
+        setCompanyLogoPreview(previousLogoData, previousLogoData ? previousLogoLabel : "");
         companyEditorErrorEl.textContent = err.message || "افزودن لوگو ممکن نشد.";
         companyEditorErrorEl.hidden = false;
-        setCompanyLogoPreview("", "");
       }
     });
 

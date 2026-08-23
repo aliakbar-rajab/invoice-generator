@@ -577,7 +577,11 @@
    ordinary button that silently ignores clicks. */
 .app-dialog-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
 .company-editor-dialog .app-dialog-actions { justify-content: space-between; }
-.company-editor-dialog .app-dialog-actions #btn-company-editor-reset { margin-inline-end: auto; }
+/* Reset (shipped profiles) and delete (user-created ones) are mutually
+   exclusive — openCompanyEditor never shows both — so each takes the same
+   start-edge slot, away from the confirm/cancel pair. */
+.company-editor-dialog .app-dialog-actions #btn-company-editor-reset,
+.company-editor-dialog .app-dialog-actions #btn-company-editor-delete { margin-inline-end: auto; }
 
 .company-editor-dialog {
   width: min(620px, 96vw);
