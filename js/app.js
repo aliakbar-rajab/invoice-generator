@@ -18,7 +18,11 @@
   // screen-preview scaler and print-page measurements.
   var MM_TO_PX = 96 / 25.4;
   var LEGACY_STORAGE_KEY = "preinvoice.autosave.v1";
+  // Legacy monolithic storage is read only for migration/recovery. New saves
+  // use one key per invoice so concurrent tabs can never overwrite unrelated
+  // entries with a stale whole-list snapshot.
   var SAVED_LIST_KEY = "preinvoice.saved.v1";
+  var SAVED_ENTRY_PREFIX = "preinvoice.saved.entry.v2.";
   var CUSTOM_PROFILES_KEY = "preinvoice.companyProfiles.v1";
   var PROFILE_ASSETS_KEY = "preinvoice.profileAssets.v1";
   var PROFILE_OVERRIDES_KEY = "preinvoice.profileOverrides.v1";
@@ -52,6 +56,9 @@
   // the number under the newly-picked company's own sequence (see SEQ_KEY_
   // PREFIX) without ever clobbering a number the user actually typed.
   var numberIsAutoSuggested = false;
+  var dateIsAutoSuggested = false;
+  var validityIsAutoSuggested = false;
+  var storageWarnings = [];
 
   var ROW_FIELD_LABELS = {
     description: "شرح کالا یا خدمت",
@@ -580,8 +587,18 @@
   // app, loading a file, or pressing New must never consume an accounting
   // number. The per-company counter advances only when the document is first
   // saved or intentionally printed/finalized (commitInvoiceNumber below).
-  function suggestInvoiceNumber(profileKey) {
-    var datePart = toAsciiDigits(todayJalaliString()).replace(/[^0-9]/g, "");
+  function invoiceDateDigits(value) {
+    var digits = toAsciiDigits(value || "").replace(/[^0-9]/g, "");
+    return /^\d{8}$/.test(digits) ? digits : "";
+  }
+
+  function currentInvoiceDateValue() {
+    var input = document.querySelector('[data-field="meta.date"]');
+    return input ? input.value : "";
+  }
+
+  function suggestInvoiceNumber(profileKey, invoiceDate) {
+    var datePart = invoiceDateDigits(invoiceDate) || invoiceDateDigits(todayJalaliString());
     if (!datePart) return "";
 
     var key = SEQ_KEY_PREFIX + (COMPANY_PROFILES[profileKey] ? profileKey : DEFAULT_PROFILE_KEY);
@@ -621,7 +638,7 @@
     if (!numberIsAutoSuggested) return false;
     var numberInput = document.querySelector('[data-field="meta.number"]');
     if (!numberInput) return false;
-    var latest = suggestInvoiceNumber(profileSelectEl.value);
+    var latest = suggestInvoiceNumber(profileSelectEl.value, currentInvoiceDateValue());
     if (!latest || latest === numberInput.value) return false;
     numberInput.value = latest;
     fitNumericEl(numberInput);
@@ -629,9 +646,45 @@
     return true;
   }
 
+  // Refresh automatic temporal values as one unit. This is called when the
+  // tab regains focus and immediately before Save/Print, so an invoice left
+  // open across midnight cannot pair yesterday's date with today's sequence.
+  // Manually edited fields are never overwritten.
+  function refreshAutomaticTemporalFields(markDirty) {
+    var changed = false;
+    var dateInput = document.querySelector('[data-field="meta.date"]');
+    var validityInput = document.querySelector('[data-field="meta.validity"]');
+    var today = todayJalaliString();
+
+    if (dateIsAutoSuggested && dateInput && today && dateInput.value !== today) {
+      dateInput.value = today;
+      changed = true;
+    }
+    if (numberIsAutoSuggested && refreshLiveInvoiceNumber()) changed = true;
+    if (validityIsAutoSuggested && validityInput && validityModeEl.value !== "manual") {
+      var validity = resolveValidityValue(validityModeEl.value);
+      if (validityInput.value !== validity) {
+        validityInput.value = validity;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      fitStaticFields();
+      if (markDirty) {
+        isDirty = true;
+        setStatus("تاریخ و شمارهٔ خودکار با روز جاری هماهنگ شد؛ تغییرات ذخیره‌نشده");
+      } else {
+        updateDocumentIdentity();
+      }
+    }
+    return changed;
+  }
+
   function blankInvoice() {
     var profileKey = DEFAULT_PROFILE_KEY;
     var profile = resolveProfile(profileKey);
+    var invoiceDate = todayJalaliString();
     return {
       version: 7,
       orientation: "landscape",
@@ -640,8 +693,8 @@
       fontScale: DEFAULT_FONT_SCALE,
       meta: {
         title: "پیش‌فاکتور",
-        date: todayJalaliString(),
-        number: suggestInvoiceNumber(profileKey),
+        date: invoiceDate,
+        number: suggestInvoiceNumber(profileKey, invoiceDate),
         validityMode: DEFAULT_VALIDITY_MODE,
         validity: resolveValidityValue(DEFAULT_VALIDITY_MODE),
       },
@@ -941,7 +994,7 @@
     syncStampVisibility();
     if (numberIsAutoSuggested) {
       var numberInput = document.querySelector('[data-field="meta.number"]');
-      if (numberInput) numberInput.value = suggestInvoiceNumber(profileKey);
+      if (numberInput) numberInput.value = suggestInvoiceNumber(profileKey, currentInvoiceDateValue());
     }
     isDirty = true;
     setStatus(editingExisting
@@ -1288,6 +1341,7 @@
   // ---------- Calculations and validation ----------
 
   var calculationErrors = [];
+  var financialBlockingErrors = [];
 
   function rowIsBlank(tr) {
     return ROW_FIELDS.every(function (field) {
@@ -1362,6 +1416,7 @@
     var discountSum = 0n;
     var afterDiscountSum = 0n;
     calculationErrors = [];
+    financialBlockingErrors = [];
 
     rows.forEach(function (tr, rowPosition) {
       var rowNumber = rowPosition + 1;
@@ -1390,6 +1445,7 @@
       tr.querySelector(".row-index-badge").textContent = toPersianDigits(rowNumber);
 
       var rowErrors = [];
+      var rowFinancialErrors = [];
       if (!descriptionInput.value.trim()) {
         rowErrors.push("شرح کالا یا خدمت وارد نشده است");
         setInlineError(descriptionInput);
@@ -1398,39 +1454,45 @@
       var qty = strictQuantity(qtyInput.value);
       if (!qty.valid) {
         rowErrors.push("تعداد/مقدار معتبر نیست");
+        rowFinancialErrors.push("تعداد/مقدار معتبر نیست");
         setInlineError(qtyInput);
       }
 
       var price = strictMoney(priceInput.value, false);
       if (!price.valid) {
         rowErrors.push("مبلغ واحد معتبر نیست");
+        rowFinancialErrors.push("مبلغ واحد معتبر نیست");
         setInlineError(priceInput);
       }
 
       var discount = strictMoney(discountInput.value, true);
       if (!discount.valid) {
         rowErrors.push("تخفیف معتبر نیست");
+        rowFinancialErrors.push("تخفیف معتبر نیست");
         setInlineError(discountInput);
       }
 
       var total = 0n;
-      if (qty.calculable && price.calculable) total = bigRoundDiv(qty.value * price.value, 1000n);
-      if (discount.calculable && qty.calculable && price.calculable && total >= 0n && discount.value > total) {
+      if (qty.valid && price.valid) total = bigRoundDiv(qty.value * price.value, 1000n);
+      if (discount.valid && qty.valid && price.valid && discount.value > total) {
         rowErrors.push("تخفیف از مبلغ کل ردیف بیشتر است");
+        rowFinancialErrors.push("تخفیف از مبلغ کل ردیف بیشتر است");
         setInlineError(discountInput);
       }
 
       rowErrors.forEach(function (message) {
         calculationErrors.push("ردیف " + toPersianDigits(rowNumber) + ": " + message);
       });
+      rowFinancialErrors.forEach(function (message) {
+        financialBlockingErrors.push("ردیف " + toPersianDigits(rowNumber) + ": " + message);
+      });
 
       // A missing description is unrelated to the arithmetic. Invalid numeric
-      // fields also must not poison other rows: an uncomputable row contributes
-      // zero, while an invalid optional discount is treated as zero. A discount
-      // larger than the row total remains mathematically usable (and is merely
-      // reported as a warning).
-      if (qty.calculable && price.calculable) {
-        var usableDiscount = discount.calculable ? discount.value : 0n;
+      // values are never allowed to alter an authoritative total: an invalid
+      // quantity/price excludes this row, while an invalid or excessive
+      // discount is neutralized to zero. Healthy rows continue to calculate.
+      if (qty.valid && price.valid) {
+        var usableDiscount = discount.valid && discount.value <= total ? discount.value : 0n;
         var afterDiscount = total - usableDiscount;
         totalEl.textContent = formatBigRial(total);
         afterDiscountEl.textContent = formatBigRial(afterDiscount);
@@ -1454,10 +1516,11 @@
     var tax = strictPercent(taxPercentInput.value);
     if (!tax.valid) {
       calculationErrors.push("درصد مالیات باید بین صفر تا صد باشد");
+      financialBlockingErrors.push("درصد مالیات باید بین صفر تا صد باشد");
       setInlineError(taxPercentInput);
     }
 
-    var usableTax = tax.calculable ? tax.value : 0n;
+    var usableTax = tax.valid ? tax.value : 0n;
     var taxTotal = bigRoundDiv(afterDiscountSum * usableTax, 10000n);
     var netTotal = afterDiscountSum + taxTotal;
     var money = function (value) {
@@ -1493,7 +1556,8 @@
   }
 
   function renderOutputWarnings(warnings) {
-    var unique = warnings.filter(function (text, index) { return warnings.indexOf(text) === index; });
+    var combined = storageWarnings.concat(warnings || []);
+    var unique = combined.filter(function (text, index) { return combined.indexOf(text) === index; });
     validationListEl.innerHTML = "";
     unique.forEach(function (text) {
       var li = document.createElement("li");
@@ -1521,6 +1585,15 @@
     }
 
     return renderOutputWarnings(errors);
+  }
+
+  function blockAuthoritativeAction(actionLabel) {
+    recalcAll();
+    if (financialBlockingErrors.length === 0) return false;
+    validationRequested = true;
+    renderOutputWarnings(calculationErrors);
+    setStatus(actionLabel + " انجام نشد؛ خطاهای مالی را اصلاح کنید.");
+    return true;
   }
 
   function setTotal(key, text) {
@@ -1586,6 +1659,11 @@
           el.dataset.touched = "true";
           if (el.isContentEditable) el.textContent = toPersianDigits(el.textContent);
           else el.value = toPersianDigits(el.value);
+          if (field === "meta.date") {
+            dateIsAutoSuggested = false;
+            if (numberIsAutoSuggested) refreshLiveInvoiceNumber();
+          }
+          if (field === "meta.validity") validityIsAutoSuggested = false;
           recalcAll({ skipStaticFit: false });
         });
         if (el.tagName === "INPUT") {
@@ -1596,6 +1674,8 @@
             // no longer a live suggestion — a later company switch must not
             // overwrite whatever they put there.
             if (field === "meta.number") numberIsAutoSuggested = false;
+            if (field === "meta.date") dateIsAutoSuggested = false;
+            if (field === "meta.validity") validityIsAutoSuggested = false;
             // The footer band is a single website field now; its is-empty
             // state (and the amount-in-words strip's) is derived centrally in
             // fitStaticFields rather than per-item here.
@@ -1769,6 +1849,8 @@
     setFontScale();
     validationRequested = false;
     validationEl.hidden = true;
+    dateIsAutoSuggested = false;
+    validityIsAutoSuggested = false;
     recalcAll();
   }
 
@@ -1781,17 +1863,96 @@
   // exists (asking for a name only the first time); "جدید" / opening a file
   // from disk detach from that entry so the next Save starts a new one.
 
-  function loadSavedList() {
+  function addStorageWarning(message) {
+    if (storageWarnings.indexOf(message) === -1) storageWarnings.push(message);
+  }
+
+  function normalizeSavedEntry(entry, fallbackId) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
+    if (!entry.data || typeof entry.data !== "object" || Array.isArray(entry.data)) return null;
+    var id = String(entry.id || fallbackId || "").trim();
+    if (!id) return null;
+    var savedAt = Number(entry.savedAt);
+    return {
+      id: id,
+      name: String(entry.name || "پیش‌فاکتور بدون نام"),
+      savedAt: Number.isFinite(savedAt) && savedAt > 0 ? savedAt : 0,
+      data: entry.data,
+    };
+  }
+
+  function readLegacySavedList() {
+    var raw = localStorage.getItem(SAVED_LIST_KEY);
+    if (!raw) return {};
     try {
-      var raw = localStorage.getItem(SAVED_LIST_KEY);
-      return raw ? JSON.parse(raw) : {};
+      var parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Invalid saved list");
+      return parsed;
     } catch (err) {
+      addStorageWarning("فهرست قدیمی ذخیره‌ها خراب است؛ برای جلوگیری از حذف اطلاعات دست‌نخورده نگه داشته شد.");
       return {};
     }
   }
 
-  function persistSavedList(list) {
-    localStorage.setItem(SAVED_LIST_KEY, JSON.stringify(list));
+  function loadSavedList() {
+    var list = {};
+    try {
+      for (var index = 0; index < localStorage.length; index += 1) {
+        var key = localStorage.key(index);
+        if (!key || key.indexOf(SAVED_ENTRY_PREFIX) !== 0) continue;
+        var fallbackId = key.slice(SAVED_ENTRY_PREFIX.length);
+        try {
+          var entry = normalizeSavedEntry(JSON.parse(localStorage.getItem(key) || "null"), fallbackId);
+          if (!entry) throw new Error("Invalid saved entry");
+          list[entry.id] = entry;
+        } catch (err) {
+          addStorageWarning("حداقل یک سند ذخیره‌شده خراب است؛ نسخهٔ خام آن برای بازیابی حذف نشد.");
+        }
+      }
+
+      // Until migration completes, keep valid legacy entries visible. New v2
+      // entries win on id collisions and are stored independently.
+      var legacy = readLegacySavedList();
+      Object.keys(legacy).forEach(function (id) {
+        if (list[id]) return;
+        var entry = normalizeSavedEntry(legacy[id], id);
+        if (entry) list[entry.id] = entry;
+        else addStorageWarning("حداقل یک سند در فهرست قدیمی خراب است و برای بازیابی حذف نشد.");
+      });
+    } catch (err) {
+      addStorageWarning("دسترسی به ذخیره‌های مرورگر ممکن نشد؛ از پشتیبان فایل استفاده کنید.");
+    }
+    return list;
+  }
+
+  function persistSavedEntry(entry) {
+    var normalized = normalizeSavedEntry(entry, entry && entry.id);
+    if (!normalized) throw new Error("Invalid saved entry");
+    localStorage.setItem(SAVED_ENTRY_PREFIX + normalized.id, JSON.stringify(normalized));
+  }
+
+  function removeSavedEntry(id) {
+    localStorage.removeItem(SAVED_ENTRY_PREFIX + id);
+  }
+
+  function migrateSavedListStorage() {
+    try {
+      var raw = localStorage.getItem(SAVED_LIST_KEY);
+      if (!raw) return;
+      var legacy = readLegacySavedList();
+      if (!Object.keys(legacy).length) return;
+      Object.keys(legacy).forEach(function (id) {
+        var entry = normalizeSavedEntry(legacy[id], id);
+        if (!entry) throw new Error("Invalid legacy entry");
+        var targetKey = SAVED_ENTRY_PREFIX + entry.id;
+        if (!localStorage.getItem(targetKey)) persistSavedEntry(entry);
+      });
+      // Remove the monolithic source only after every independent entry write
+      // succeeds. Quota/security failures leave it recoverable and visible.
+      localStorage.removeItem(SAVED_LIST_KEY);
+    } catch (err) {
+      addStorageWarning("انتقال ذخیره‌های قدیمی کامل نشد؛ نسخهٔ اصلی برای بازیابی حفظ شد.");
+    }
   }
 
   // A one-time upgrade path so users who saved under the old single-slot
@@ -1800,17 +1961,11 @@
     try {
       var legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
       if (!legacyRaw) return;
-      // Read this key strictly during migration. The ordinary UI treats a
-      // corrupt list as empty so it can keep running, but migration must not
-      // overwrite an unreadable list and compound the data loss.
-      var savedRaw = localStorage.getItem(SAVED_LIST_KEY);
-      var list = savedRaw ? JSON.parse(savedRaw) : {};
-      if (!list || typeof list !== "object" || Array.isArray(list)) throw new Error("Invalid saved list");
-      if (Object.keys(list).length === 0) {
-        var data = JSON.parse(legacyRaw);
-        var id = "inv-" + Date.now().toString(36);
-        list[id] = { id: id, name: "بازیابی‌شده از نسخهٔ قبلی برنامه", savedAt: Date.now(), data: data };
-        persistSavedList(list);
+      var data = JSON.parse(legacyRaw);
+      if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid legacy autosave");
+      var id = "inv-legacy-autosave";
+      if (!localStorage.getItem(SAVED_ENTRY_PREFIX + id)) {
+        persistSavedEntry({ id: id, name: "بازیابی‌شده از نسخهٔ قبلی برنامه", savedAt: Date.now(), data: data });
       }
       // Only remove the source after the replacement write has completed.
       // A quota/security failure must leave the legacy invoice recoverable.
@@ -1818,6 +1973,7 @@
     } catch (err) {
       // Keep the source intact. A future session (or a user-created backup)
       // may still be able to recover it once storage becomes available.
+      addStorageWarning("ذخیرهٔ خودکار نسخهٔ قدیمی خراب است یا منتقل نشد؛ نسخهٔ خام آن حذف نشد.");
     }
   }
 
@@ -1895,9 +2051,12 @@
       li.appendChild(actions);
       savedListEl.appendChild(li);
     });
+    renderOutputWarnings(calculationErrors);
   }
 
   async function saveCurrent(forceNew) {
+    refreshAutomaticTemporalFields(true);
+    if (blockAuthoritativeAction("ذخیره")) return false;
     var list = loadSavedList();
     var data = collectInvoiceData();
     var name;
@@ -1927,22 +2086,19 @@
       // entered and imported numbers remain exactly as authored.
       refreshLiveInvoiceNumber();
       data = collectInvoiceData();
-      // The naming dialog may stay open while another tab saves. Refresh the
-      // shared list immediately before writing so that tab's entries are not
-      // overwritten by the stale pre-dialog snapshot.
-      list = loadSavedList();
-      list[currentSavedId] = {
+      persistSavedEntry({
         id: currentSavedId,
         name: name,
         savedAt: Date.now(),
         data: dataForBrowserStorage(data),
-      };
-      persistSavedList(list);
+      });
       // Commit every valid daily-format number, not only untouched automatic
       // suggestions. Manually corrected and file-imported numbers must also
       // advance the counter or the next document can reuse them.
       commitInvoiceNumber(data.company.profile, data.meta.number);
       numberIsAutoSuggested = false;
+      dateIsAutoSuggested = false;
+      validityIsAutoSuggested = false;
       currentSavedName = name;
       isDirty = false;
       renderSavedList();
@@ -1961,6 +2117,12 @@
     if (isDirty) {
       var confirmed = await confirmApp("باز کردن سند", "تغییرات ذخیره‌نشده از بین می‌رود. «" + entry.name + "» باز شود؟", "باز کردن");
       if (!confirmed) return;
+      entry = loadSavedList()[id];
+      if (!entry) {
+        renderSavedList();
+        setStatus("این سند در برگهٔ دیگری حذف شده است.");
+        return;
+      }
     }
 
     applyInvoiceData(entry.data);
@@ -1980,8 +2142,15 @@
     var confirmed = await confirmApp("حذف سند", "«" + entry.name + "» حذف شود؟ این کار قابل بازگشت نیست.", "حذف", true);
     if (!confirmed) return;
 
-    delete list[id];
-    persistSavedList(list);
+    try {
+      // Delete only this entry's independent key. No whole-list snapshot is
+      // written, so saves made by another tab while confirmation was open are
+      // preserved.
+      removeSavedEntry(id);
+    } catch (err) {
+      setStatus("حذف سند از ذخیرهٔ مرورگر ناموفق بود.");
+      return;
+    }
     if (currentSavedId === id) {
       currentSavedId = null;
       currentSavedName = "";
@@ -2322,6 +2491,29 @@
     return { compact: compact, chunks: chunks, orientation: orientation };
   }
 
+  // Rebuild and measure the exact final page structures (including real page
+  // numbers and continuation headers) before opening the browser print UI.
+  // This is the last safety net against CSS/rounding drift after planning.
+  function verifyPrintPlanFits(plan) {
+    var totalPages = plan.chunks.length;
+    var startIndex = 0;
+    for (var index = 0; index < totalPages; index += 1) {
+      var chunk = plan.chunks[index];
+      var page = clonePrintPage(chunk, {
+        orientation: plan.orientation,
+        compact: plan.compact,
+        continuation: index > 0,
+        finalPage: index === totalPages - 1,
+        startIndex: startIndex,
+        pageNo: index + 1,
+        totalPages: totalPages,
+      });
+      startIndex += chunk.length;
+      if (!pageFits(page)) return { fits: false, pageNo: index + 1 };
+    }
+    return { fits: true, pageNo: null };
+  }
+
   function renderPrintPlan(plan) {
     printDocumentEl.innerHTML = "";
     var totalPages = plan.chunks.length;
@@ -2353,9 +2545,13 @@
 
   async function printInvoice() {
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    refreshLiveInvoiceNumber();
+    refreshAutomaticTemporalFields(true);
     recalcAll();
     var warnings = validateInvoiceForOutput();
+    if (financialBlockingErrors.length) {
+      setStatus("چاپ انجام نشد؛ خطاهای مالی را اصلاح کنید.");
+      return false;
+    }
 
     if (document.fonts && document.fonts.ready) await document.fonts.ready;
     autoGrowTextareas();
@@ -2369,6 +2565,7 @@
       recalcAll();
       orientation = "landscape";
       isDirty = true;
+      setStatus("جهت چاپ برای خوانایی مبالغ افقی شد؛ تغییرات ذخیره‌نشده");
       warnings.push("برای خوانایی مبالغ، جهت چاپ به‌صورت خودکار افقی شد");
     }
     if (sheet.querySelector(".inv-table .numeric-overflow, .inv-totals .numeric-overflow")) {
@@ -2377,14 +2574,25 @@
 
     var plan = buildPrintPlan(rows, orientation);
     if (plan.overflowRowIndex != null) {
-      // Last-resort pagination: keep every row printable and put the totals on
-      // their own final page instead of blocking on unusually tall content.
-      plan = {
-        compact: true,
-        chunks: rows.map(function (row) { return [row]; }).concat([[]]),
-        orientation: orientation,
-      };
-      warnings.push("محتوای بسیار بلند برای جلوگیری از حذف اطلاعات در چند صفحه تقسیم شد");
+      warnings.push(
+        "ردیف " + toPersianDigits(plan.overflowRowIndex + 1) +
+        " بلندتر از ظرفیت یک صفحهٔ A4 است؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد. شرح را کوتاه‌تر یا به چند ردیف تقسیم کنید"
+      );
+      renderOutputWarnings(warnings);
+      cleanupPrintDocument();
+      setStatus("چاپ انجام نشد؛ یک ردیف در صفحهٔ A4 جا نمی‌شود.");
+      return false;
+    }
+    var fitVerification = verifyPrintPlanFits(plan);
+    if (!fitVerification.fits) {
+      warnings.push(
+        "صفحهٔ " + toPersianDigits(fitVerification.pageNo) +
+        " در محدودهٔ A4 جا نمی‌شود؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد"
+      );
+      renderOutputWarnings(warnings);
+      cleanupPrintDocument();
+      setStatus("چاپ انجام نشد؛ چیدمان نهایی از محدودهٔ A4 بیرون می‌زند.");
+      return false;
     }
     if (plan.chunks.length > 1) warnings.push("این پیش‌فاکتور در " + toPersianDigits(plan.chunks.length) + " صفحه چاپ می‌شود");
     renderOutputWarnings(warnings);
@@ -2393,6 +2601,8 @@
     var data = collectInvoiceData();
     commitInvoiceNumber(data.company.profile, data.meta.number);
     numberIsAutoSuggested = false;
+    dateIsAutoSuggested = false;
+    validityIsAutoSuggested = false;
 
     var oldTitle = document.title;
     var dataForName = collectInvoiceData();
@@ -2405,6 +2615,7 @@
       window.print();
       document.title = oldTitle;
     }, 0);
+    return true;
   }
 
   window.addEventListener("afterprint", cleanupPrintDocument);
@@ -2509,6 +2720,8 @@
       currentSavedName = "";
       isDirty = false;
       numberIsAutoSuggested = true;
+      dateIsAutoSuggested = true;
+      validityIsAutoSuggested = true;
       stampRequested = true;
       syncStampVisibility();
       setStatus("سند جدید آماده است.");
@@ -2545,7 +2758,7 @@
       syncStampVisibility();
       if (numberIsAutoSuggested) {
         var numberInput = document.querySelector('[data-field="meta.number"]');
-        if (numberInput) numberInput.value = suggestInvoiceNumber(nextKey);
+        if (numberInput) numberInput.value = suggestInvoiceNumber(nextKey, currentInvoiceDateValue());
       }
       isDirty = true;
       setStatus(isCustomProfile(nextKey) ? "نام و مشخصات شرکت را وارد کنید." : "شرکت صادرکننده تغییر کرد؛ سند دوباره نیاز به تأیید دارد.");
@@ -2556,6 +2769,7 @@
       var input = document.querySelector('[data-field="meta.validity"]');
       if (input) input.value = resolveValidityValue(this.value);
       syncValidityFieldVisibility(this.value);
+      validityIsAutoSuggested = this.value !== "manual";
       if (this.value === "manual" && input) input.focus();
       isDirty = true;
       setStatus("تغییرات ذخیره‌نشده");
@@ -2715,6 +2929,12 @@
     // whose sheet is a different width).
     fitSheetScale();
     window.addEventListener("resize", fitSheetScale);
+    window.addEventListener("focus", function () {
+      refreshAutomaticTemporalFields(true);
+    });
+    document.addEventListener("visibilitychange", function () {
+      if (!document.hidden) refreshAutomaticTemporalFields(true);
+    });
 
     // Keyboard shortcuts: Ctrl+S saves to the browser list (instead of the
     // browser's useless "save page" dialog), Ctrl+P routes through the same
@@ -2748,6 +2968,7 @@
       return "";
     });
 
+    migrateSavedListStorage();
     migrateLegacyAutosave();
     hydrateCompanyProfiles();
     // Every load starts a clean blank invoice — nothing is auto-restored.
@@ -2757,6 +2978,8 @@
     currentSavedId = null;
     currentSavedName = "";
     numberIsAutoSuggested = true;
+    dateIsAutoSuggested = true;
+    validityIsAutoSuggested = true;
     stampRequested = true;
     syncStampVisibility();
     setStatus("آماده برای ثبت پیش‌فاکتور جدید.");

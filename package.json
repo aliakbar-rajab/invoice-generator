@@ -1,0 +1,11 @@
+{
+  "name": "offline-pishfaktor",
+  "private": true,
+  "scripts": {
+    "test": "playwright test",
+    "test:regression": "playwright test tests/invoice-regressions.spec.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
+  }
+}
