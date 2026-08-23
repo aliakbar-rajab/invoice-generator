@@ -337,7 +337,7 @@ body {
 
 .invoice-sheet.header-gray .inv-head,
 .invoice-sheet.header-gray .inv-footer {
-  background: #f2f2f2;
+  background: #e4e4e4;
 }
 
 /* The band used to be a dark fill with a rule under it to separate the two.
@@ -623,6 +623,20 @@ body {
   font-weight: 700;
 }
 
+/* Postal code / national ID / phone stay `dir="ltr"` so digits are typed and
+   read left-to-right, but that also makes the base `.inv-input`'s
+   `text-align: inherit` resolve against THIS element's own direction, i.e.
+   left — while print drops the `dir` attribute when it swaps the field for
+   plain text (see replaceFormControlsWithText in app.js), so the very same
+   value resolves right there instead. A physical value here removes that
+   screen/print split (and the mid-typing flicker it caused) by not depending
+   on direction resolution at all. */
+.inv-card [data-field$="postalCode"],
+.inv-card [data-field$="nationalId"],
+.inv-card [data-field$="phone"] {
+  text-align: right;
+}
+
 /* ---------- Table ---------- */
 
 .inv-table-frame {
@@ -688,9 +702,11 @@ body {
   background: transparent;
 }
 
-/* Right-align the description column and every financial column so figures
-   read as a scannable ledger; qty/unit stay centered (short tokens). */
-.inv-table th:nth-child(3),
+/* Headers stay centered (the base `.inv-table th, .inv-table td` rule
+   above) regardless of how each column's own data cells are aligned below.
+   Right-align the description column so its prose reads naturally; every
+   numeric column (qty/price/discount/computed totals) is left-aligned so
+   figures read as a scannable ledger, unit stays centered (short token). */
 .inv-table td:has(.cell-input[data-row-field="description"]) {
   text-align: right;
   /* Prose, not a figure: wrap between words and only break inside one when a
@@ -698,14 +714,9 @@ body {
   overflow-wrap: break-word;
 }
 
-.inv-table th:nth-child(6),
-.inv-table th:nth-child(7),
-.inv-table th:nth-child(8),
-.inv-table th:nth-child(9),
-.inv-table td:has(.cell-input[data-row-field="unitPrice"]),
-.inv-table td:has(.cell-input[data-row-field="discount"]),
+.inv-table td:has(.cell-input-num),
 .inv-table td[data-row-computed] {
-  text-align: right;
+  text-align: left;
 }
 
 /*
@@ -907,7 +918,7 @@ body {
 .inv-totals strong {
   flex: 1 1 auto;
   min-width: 0;
-  text-align: end;
+  text-align: left;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
@@ -1168,6 +1179,12 @@ body {
 
 .inv-table .cell-input {
   text-align: center;
+}
+
+/* qty/price/discount: a physical value, not `inherit`/`start`, so alignment
+   can't drift with the field's resolved bidi direction while typing digits. */
+.inv-table .cell-input.cell-input-num {
+  text-align: left;
 }
 
 .inv-table td:has(.cell-input[data-row-field="description"]) .cell-input {

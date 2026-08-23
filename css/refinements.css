@@ -17,7 +17,7 @@ body,
 
 .invoice-sheet {
   --band-fill: #fff;
-  --surface: #e6e6e6;
+  --surface: #d8d8d8;
   --edge: 0.42mm;
   --sig-w: 44mm;
   --sig-h: 43mm;
@@ -41,7 +41,7 @@ body,
 }
 
 .invoice-sheet.header-gray .inv-head,
-.invoice-sheet.header-gray .inv-footer { background: #f2f2f2; }
+.invoice-sheet.header-gray .inv-footer { background: #e4e4e4; }
 
 .inv-card,
 .inv-table-frame,
@@ -275,7 +275,7 @@ body,
   .inv-head,
   .inv-footer { background: #fff !important; }
   .print-page.header-gray .inv-head,
-  .print-page.header-gray .inv-footer { background: #f2f2f2 !important; }
+  .print-page.header-gray .inv-footer { background: #e4e4e4 !important; }
   .invoice-validation,
   .inv-stamp-draft-note { display: none !important; }
 }

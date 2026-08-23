@@ -48,7 +48,7 @@
   // default"; a data URL means "use this image only on the current document".
   // These values may be saved with the invoice, but never mutate a profile.
   var invoiceAssetOverrides = { logo: null, stamp: null };
-  var DEFAULT_INVOICE_ROWS_BY_ORIENTATION = { landscape: 7, portrait: 8 };
+  var DEFAULT_INVOICE_ROWS_BY_ORIENTATION = { landscape: 7, portrait: 14 };
   // Only a fresh, untouched document follows the orientation defaults. Once
   // the user edits the item rows, their exact count becomes authoritative.
   var defaultRowCountManaged = false;
@@ -483,12 +483,98 @@
     }
   }
 
+  // Reads whatever's actually in the تاریخ field — "1405/06/01", "1405-06-01"
+  // and "14050601" (no separator at all) all land here, since this only cares
+  // about the 8 digits underneath: 4-digit year + 2-digit month + 2-digit day.
+  // Reuses invoiceDateDigits (below) rather than a second ad-hoc regex, so the
+  // two places in this file that need "whatever format, just give me the
+  // digits" can't quietly drift apart.
+  function parseJalaliDateField(value) {
+    var digits = invoiceDateDigits(value);
+    if (!digits) return null;
+    var y = parseInt(digits.slice(0, 4), 10);
+    var m = parseInt(digits.slice(4, 6), 10);
+    var d = parseInt(digits.slice(6, 8), 10);
+    if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+    return { y: y, m: m, d: d };
+  }
+
+  function formatJalaliYmd(y, m, d) {
+    var pad2 = function (n) { return (n < 10 ? "0" : "") + n; };
+    return toPersianDigits(y + "/" + pad2(m) + "/" + pad2(d));
+  }
+
+  // Converts a Jalali {y,m,d} to the equivalent Gregorian Date, needed only to
+  // add a day for "tomorrow" mode (month/year rollover needs real calendar
+  // rules). Rather than reimplementing the Jalali leap-year algorithm, this
+  // seeds a rough Gregorian estimate (Farvardin 1 of a Jalali year falls on
+  // ~March 21 of the Gregorian year 621 later) and then, exactly like
+  // tomorrowJalaliString above, defers to the browser's own Intl Jalali
+  // calendar to confirm/correct it — searching the ±10 days around the seed
+  // for the one whose Persian-calendar formatting matches {y,m,d} exactly.
+  // Ten days comfortably covers the seed's worst-case drift (the seed assumes
+  // every month is 30 days; real months run 29-31).
+  function jalaliPartsToGregorianDate(y, m, d) {
+    var monthLenEstimate = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 30];
+    var dayOfYear = d;
+    for (var i = 0; i < m - 1; i += 1) dayOfYear += monthLenEstimate[i];
+    var seed = new Date(y + 621, 2, 21);
+    seed.setDate(seed.getDate() + dayOfYear - 1);
+    try {
+      var fmt = new Intl.DateTimeFormat("fa-IR-u-ca-persian", { year: "numeric", month: "2-digit", day: "2-digit" });
+      for (var offset = -10; offset <= 10; offset += 1) {
+        var candidate = new Date(seed);
+        candidate.setDate(candidate.getDate() + offset);
+        var parts = fmt.formatToParts(candidate);
+        var py = 0, pm = 0, pd = 0;
+        parts.forEach(function (part) {
+          var n = parseInt(toAsciiDigits(part.value), 10);
+          if (part.type === "year") py = n;
+          else if (part.type === "month") pm = n;
+          else if (part.type === "day") pd = n;
+        });
+        if (py === y && pm === m && pd === d) return candidate;
+      }
+    } catch (err) {
+      return null;
+    }
+    return null;
+  }
+
   // Resolves a validity mode (see VALID_VALIDITY_MODES) to the text that
   // belongs in the printed "اعتبار پیش‌فاکتور" field. "manual" resolves to
   // an empty string — the field is left for the user to type into.
-  function resolveValidityValue(mode) {
-    if (mode === "tomorrow") return tomorrowJalaliString();
+  //
+  // "today"/"tomorrow" are relative to the تاریخ field's own value (whatever
+  // format it was typed in), not the real-world date — an invoice dated for
+  // next week must show a validity that's relative to ITS date, not today's.
+  // dateFieldValue defaults to the live DOM value; callers building a
+  // not-yet-applied document (blankInvoice) pass the intended date explicitly
+  // so this doesn't read the field of whatever document is still on screen.
+  function resolveValidityValue(mode, dateFieldValue) {
     if (mode === "manual") return "";
+    var reference = parseJalaliDateField(dateFieldValue !== undefined ? dateFieldValue : currentInvoiceDateValue());
+    if (mode === "tomorrow") {
+      if (reference) {
+        var greg = jalaliPartsToGregorianDate(reference.y, reference.m, reference.d);
+        if (greg) {
+          try {
+            var next = new Date(greg);
+            next.setDate(next.getDate() + 1);
+            var formatted = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+              year: "numeric",
+              month: "2-digit",
+              day: "2-digit",
+            }).format(next);
+            if (formatted) return formatted;
+          } catch (err) {
+            // fall through to the real-world fallback below
+          }
+        }
+      }
+      return tomorrowJalaliString();
+    }
+    if (reference) return formatJalaliYmd(reference.y, reference.m, reference.d);
     return todayJalaliString() || VALIDITY_LABEL_TODAY;
   }
 
@@ -649,6 +735,25 @@
     return true;
   }
 
+  // Keeps "اعتبار پیش‌فاکتور" glued to whatever's actually in the تاریخ field
+  // whenever mode isn't "manual". In "today"/"tomorrow" mode the value
+  // field is always auto (it's hidden from editing — see syncValidityFieldVisibility),
+  // so unlike refreshLiveInvoiceNumber above this isn't gated on an
+  // IsAutoSuggested flag: there's no hand-typed value in those modes to
+  // protect from being overwritten, on a fresh document or one reopened after
+  // being saved.
+  function refreshValidityFromDate() {
+    if (validityModeEl.value === "manual") return false;
+    var validityInput = document.querySelector('[data-field="meta.validity"]');
+    if (!validityInput) return false;
+    var latest = resolveValidityValue(validityModeEl.value);
+    if (latest === validityInput.value) return false;
+    validityInput.value = latest;
+    fitStaticFields();
+    updateDocumentIdentity();
+    return true;
+  }
+
   // Refresh automatic temporal values as one unit. This is called when the
   // tab regains focus and immediately before Save/Print, so an invoice left
   // open across midnight cannot pair yesterday's date with today's sequence.
@@ -699,7 +804,7 @@
         date: invoiceDate,
         number: suggestInvoiceNumber(profileKey, invoiceDate),
         validityMode: DEFAULT_VALIDITY_MODE,
-        validity: resolveValidityValue(DEFAULT_VALIDITY_MODE),
+        validity: resolveValidityValue(DEFAULT_VALIDITY_MODE, invoiceDate),
       },
       buyer: { name: "", nationalId: "", address: "", postalCode: "", phone: "" },
       seller: sellerFromProfile(profile),
@@ -1692,6 +1797,7 @@
           if (field === "meta.date") {
             dateIsAutoSuggested = false;
             if (numberIsAutoSuggested) refreshLiveInvoiceNumber();
+            refreshValidityFromDate();
           }
           if (field === "meta.validity") validityIsAutoSuggested = false;
           recalcAll({ skipStaticFit: false });
