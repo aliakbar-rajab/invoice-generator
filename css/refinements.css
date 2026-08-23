@@ -115,7 +115,7 @@ body,
   font-feature-settings: "tnum" 1;
 }
 
-/* The editor keeps eight ruled rows; unused rows also remain in print. */
+/* Row count is user-controlled; every visible row also remains in print. */
 .inv-table-actions {
   display: flex;
   align-items: center;

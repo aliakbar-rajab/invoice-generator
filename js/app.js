@@ -40,7 +40,7 @@
   // company identity. Keep its branding outside COMPANY_PROFILES so opening
   // one ad-hoc invoice can never leak its logo or stamp into the next one.
   var adHocCompanyAssets = { logo: "", stamp: "" };
-  var MIN_INVOICE_ROWS = 8;
+  var DEFAULT_INVOICE_ROWS = 8;
 
   // True while meta.number still holds a live suggestion (set by blankInvoice
   // on New/boot) rather than something the user typed or a value that came in
@@ -597,7 +597,7 @@
     var profileKey = DEFAULT_PROFILE_KEY;
     var profile = resolveProfile(profileKey);
     return {
-      version: 5,
+      version: 6,
       orientation: "landscape",
       headerGray: true,
       font: DEFAULT_FONT_KEY,
@@ -615,9 +615,9 @@
       taxPercent: "۱۰",
       notes: "",
       includeStamp: true,
-      // Keep the familiar eight-row form visible. Unused rows are not saved,
-      // but they remain on the editor and printed A4 as empty ruled rows.
-      items: makeBlankRows(MIN_INVOICE_ROWS),
+      // Eight rows are only the starting point for a new document. From this
+      // point onward the user's exact row count is authoritative.
+      items: makeBlankRows(DEFAULT_INVOICE_ROWS),
     };
   }
 
@@ -917,11 +917,6 @@
       rows.push({ description: "", quantity: "", unit: "", unitPrice: "", discount: "" });
     }
     return rows;
-  }
-
-  function ensureMinimumRows() {
-    var missing = MIN_INVOICE_ROWS - rowsBody.querySelectorAll("tr").length;
-    for (var i = 0; i < missing; i += 1) createRow({}, { skipRecalc: true });
   }
 
   // ---------- Path helpers ----------
@@ -1226,15 +1221,7 @@
         var confirmed = await confirmApp("حذف قلم", "این قلم از پیش‌فاکتور حذف شود؟", "حذف", true);
         if (!confirmed) return;
       }
-      var rows = rowsBody.querySelectorAll("tr");
-      if (rows.length <= 1) {
-        ROW_FIELDS.forEach(function (field) {
-          rows[0].querySelector('[data-row-field="' + field + '"]').value = "";
-        });
-      } else {
-        tr.remove();
-      }
-      ensureMinimumRows();
+      tr.remove();
       recalcAll();
       isDirty = true;
       setStatus("قلم حذف شد؛ تغییرات ذخیره‌نشده");
@@ -1581,7 +1568,7 @@
 
   function collectInvoiceData() {
     var data = {
-      version: 5,
+      version: 6,
       orientation: currentOrientation(),
       headerGray: sheet.classList.contains("header-gray"),
       font: DEFAULT_FONT_KEY,
@@ -1623,7 +1610,6 @@
     data.meta.validityMode = validityModeEl.value;
 
     rowsBody.querySelectorAll("tr").forEach(function (tr) {
-      if (rowIsBlank(tr)) return;
       var row = {};
       ROW_FIELDS.forEach(function (field) {
         row[field] = tr.querySelector('[data-row-field="' + field + '"]').value;
@@ -1680,13 +1666,8 @@
       taxPercent: raw && raw.taxPercent != null ? raw.taxPercent : defaults.taxPercent,
       notes: raw && raw.notes != null ? raw.notes : defaults.notes,
       includeStamp: raw && raw.includeStamp != null ? !!raw.includeStamp : defaults.includeStamp,
-      items: raw && raw.items && raw.items.length ? raw.items.filter(function (row) {
-        return ROW_FIELDS.some(function (field) { return row && String(row[field] || "").trim(); });
-      }) : defaults.items,
+      items: raw && Array.isArray(raw.items) ? raw.items.slice() : defaults.items,
     };
-    while (data.items.length < MIN_INVOICE_ROWS) {
-      data.items.push(makeBlankRows(1)[0]);
-    }
 
     document.querySelectorAll("[data-field]").forEach(function (el) {
       var value = getPath(data, el.getAttribute("data-field"));
@@ -1721,7 +1702,6 @@
     syncStampVisibility();
 
     rowsBody.innerHTML = "";
-    if (!data.items.length) data.items = makeBlankRows(MIN_INVOICE_ROWS);
     // Not `data.items.forEach(createRow)`:  Array.prototype.forEach calls its
     // callback as (item, index, array), and createRow's second parameter is
     // an opts object (it reads opts.focusField) — passed directly, the
@@ -2075,13 +2055,9 @@
   }
 
   function printableSourceRows() {
-    var rows = Array.prototype.slice.call(rowsBody.querySelectorAll("tr"));
-    var filled = rows.filter(function (tr) { return !rowIsBlank(tr); });
-    var fillerCount = Math.max(0, MIN_INVOICE_ROWS - filled.length);
-    var fillers = rows.filter(rowIsBlank).slice(0, fillerCount);
-    // Keep the familiar eight ruled rows on short invoices, but never let
-    // extra Enter-created empty rows manufacture blank printed pages.
-    return filled.concat(fillers);
+    // The editor is the source of truth. Preserve every row, including empty
+    // rows and their exact order, because spacing is part of the user's form.
+    return Array.prototype.slice.call(rowsBody.querySelectorAll("tr"));
   }
 
   function makeContinuationHeader(pageNo, totalPages) {
