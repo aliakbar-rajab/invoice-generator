@@ -1,46 +1,17 @@
 import { test, expect } from "@playwright/test";
-import http from "node:http";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
+import { repoRoot, startRepoServer, stopRepoServer } from "./server-helper.mjs";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let server;
 let baseURL;
 
-const contentTypes = {
-  ".css": "text/css; charset=utf-8",
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".png": "image/png",
-  ".svg": "image/svg+xml",
-  ".webp": "image/webp",
-  ".woff2": "font/woff2"
-};
-
 test.beforeAll(async () => {
-  server = http.createServer(async (request, response) => {
-    try {
-      const pathname = decodeURIComponent(new URL(request.url, "http://127.0.0.1").pathname);
-      const relative = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
-      const target = path.resolve(repoRoot, relative);
-      if (!target.startsWith(repoRoot + path.sep)) throw new Error("outside root");
-      const body = await readFile(target);
-      response.writeHead(200, { "Content-Type": contentTypes[path.extname(target)] || "application/octet-stream" });
-      response.end(body);
-    } catch {
-      response.writeHead(404);
-      response.end("Not found");
-    }
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  baseURL = `http://127.0.0.1:${address.port}`;
+  ({ server, baseURL } = await startRepoServer());
 });
 
 test.afterAll(async () => {
-  if (server) await new Promise((resolve) => server.close(resolve));
+  await stopRepoServer(server);
 });
 
 async function openApp(page) {
@@ -235,6 +206,69 @@ test("automatic print orientation changes update dirty and save-status UI", asyn
   await expect(page.getByRole("radio", { name: "افقی", exact: true })).toBeChecked();
   await expect(page.locator("#status-dot")).toHaveClass(/is-dirty/);
   await expect(page.locator("#toolbar-status")).not.toContainText("ذخیره شد");
+});
+
+test("a very long amount-in-words wraps instead of overflowing the box, sheet, or printed page", async ({ page }) => {
+  await openApp(page);
+  // A 15-digit unit price makes rialToWordsBig() emit a sentence far longer
+  // than the narrow totals-width box it lives in (see .inv-amount-words in
+  // css/invoice.css) — this used to force the box past the sheet's edge,
+  // since it had no min-width: 0 on its grid item and white-space: nowrap.
+  await fillValidFirstRow(page, "999999999999999");
+  await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار آزمایشی");
+  await page.getByLabel("درصد مالیات و عوارض", { exact: true }).fill("10");
+
+  const wordsValue = page.locator('[data-total="netTotalWords"]');
+  await expect(wordsValue).not.toHaveText("صفر ریال");
+  // Proof the sentence is actually long enough to force wrapping, not just
+  // short text that happens to fit.
+  expect((await wordsValue.textContent()).length).toBeGreaterThan(80);
+
+  for (const orientationName of ["افقی", "عمودی"]) {
+    await page.getByRole("radio", { name: orientationName, exact: true }).check();
+
+    const wordsBox = page.locator("#invoice-sheet .inv-amount-words");
+    const boxMetrics = await wordsBox.evaluate((el) => {
+      const sheet = document.getElementById("invoice-sheet");
+      const rect = el.getBoundingClientRect();
+      const sheetRect = sheet.getBoundingClientRect();
+      return {
+        horizontalOverflow: el.scrollWidth - el.clientWidth,
+        height: rect.height,
+        lineHeight: parseFloat(getComputedStyle(el).lineHeight),
+        withinSheet: rect.left >= sheetRect.left - 1 && rect.right <= sheetRect.right + 1,
+      };
+    });
+    expect(boxMetrics.horizontalOverflow, orientationName + ": box must not overflow itself").toBeLessThanOrEqual(0);
+    expect(boxMetrics.withinSheet, orientationName + ": box must stay inside the sheet").toBe(true);
+    // Confirms the fix is actually wrapping (multiple line boxes), not merely
+    // failing to overflow because the box grew unbounded in some other way.
+    expect(boxMetrics.height, orientationName + ": box must wrap onto more than one line")
+      .toBeGreaterThan(boxMetrics.lineHeight * 1.5);
+    expect(await sheetOverflow(page), orientationName + ": wrapping must not push the sheet past one A4 page")
+      .toBeLessThanOrEqual(0);
+
+    const printsBefore = await page.evaluate(() => window.__printCalls);
+    await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+    await expect.poll(
+      () => page.evaluate(() => window.__printCalls),
+      { message: orientationName + ": print must not be blocked by the wrapped box" }
+    ).toBeGreaterThan(printsBefore);
+
+    const printedPages = page.locator("#print-document .print-page");
+    expect(await printedPages.count()).toBeGreaterThan(0);
+    const pageMetrics = await printedPages.evaluateAll((elements) => elements.map((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    })));
+    expect(pageMetrics.every((metric) => metric.scrollHeight <= metric.clientHeight + 2),
+      orientationName + ": no printed page may overflow vertically").toBe(true);
+
+    const printedWordsBox = page.locator("#print-document .inv-amount-words");
+    await expect(printedWordsBox).toHaveCount(1);
+    const printedOverflow = await printedWordsBox.evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(printedOverflow, orientationName + ": printed box must not overflow horizontally").toBeLessThanOrEqual(0);
+  }
 });
 
 test("an empty invoice remains printable without a modal or warning inside the print clone", async ({ page }) => {

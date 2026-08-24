@@ -4,47 +4,17 @@
  * that the neighbouring behaviour it could plausibly have broken still works.
  */
 import { test, expect } from "@playwright/test";
-import http from "node:http";
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { startRepoServer, stopRepoServer } from "./server-helper.mjs";
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 let server;
 let baseURL;
 
-const contentTypes = {
-  ".css": "text/css; charset=utf-8",
-  ".html": "text/html; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
-  ".png": "image/png",
-  ".svg": "image/svg+xml",
-  ".webp": "image/webp",
-  ".woff2": "font/woff2"
-};
-
 test.beforeAll(async () => {
-  server = http.createServer(async (request, response) => {
-    try {
-      const pathname = decodeURIComponent(new URL(request.url, "http://127.0.0.1").pathname);
-      const relative = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
-      const target = path.resolve(repoRoot, relative);
-      if (!target.startsWith(repoRoot + path.sep)) throw new Error("outside root");
-      const body = await readFile(target);
-      response.writeHead(200, { "Content-Type": contentTypes[path.extname(target)] || "application/octet-stream" });
-      response.end(body);
-    } catch {
-      response.writeHead(404);
-      response.end("Not found");
-    }
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  baseURL = `http://127.0.0.1:${server.address().port}`;
+  ({ server, baseURL } = await startRepoServer());
 });
 
 test.afterAll(async () => {
-  if (server) await new Promise((resolve) => server.close(resolve));
+  await stopRepoServer(server);
 });
 
 async function openApp(page) {

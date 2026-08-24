@@ -775,6 +775,7 @@ body {
 
 .inv-amount-words {
   display: block;
+  min-width: 0;
   min-height: 7mm;
   margin: 0;
   padding: 0.55mm 2.5mm;
@@ -782,7 +783,7 @@ body {
   border-radius: 1.5mm;
   font-size: 0.9em;
   line-height: 1.3;
-  white-space: nowrap;
+  white-space: normal;
   break-inside: avoid;
 }
 
