@@ -123,7 +123,7 @@
           <div class="saved-panel no-print" id="saved-panel" hidden>
             <div class="saved-panel-header">
               <strong>پیش‌فاکتورهای ذخیره‌شده</strong>
-              <button type="button" id="btn-saved-close" class="saved-panel-close" title="بستن">✕</button>
+              <button type="button" id="btn-saved-close" class="saved-panel-close" title="بستن" aria-label="بستن">✕</button>
             </div>
             <p class="saved-panel-hint">نسخه‌های این فهرست روی همین مرورگر نگهداری می‌شوند. برای پشتیبان دائمی، از «پشتیبان فایل» استفاده کنید.</p>
             <ul class="saved-list" id="saved-list"></ul>
@@ -225,15 +225,15 @@
             </div>
             <div class="inv-field inv-field-wide inv-field-postal">
               <span class="inv-field-label">کد پستی</span>
-              <input type="text" class="inv-input inv-field-value" dir="ltr" data-field="seller.postalCode" aria-label="کد پستی فروشنده" />
+              <input type="text" inputmode="numeric" class="inv-input inv-field-value" dir="ltr" data-field="seller.postalCode" aria-label="کد پستی فروشنده" />
             </div>
             <div class="inv-field inv-field-wide">
               <span class="inv-field-label">شناسه ملی</span>
-              <input type="text" class="inv-input inv-field-value" dir="ltr" data-field="seller.nationalId" aria-label="شناسه ملی فروشنده" />
+              <input type="text" inputmode="numeric" class="inv-input inv-field-value" dir="ltr" data-field="seller.nationalId" aria-label="شناسه ملی فروشنده" />
             </div>
             <div class="inv-field inv-field-wide">
               <span class="inv-field-label">تلفن</span>
-              <textarea class="inv-input inv-field-value inv-autogrow" dir="ltr" data-field="seller.phone" aria-label="تلفن فروشنده" rows="1"></textarea>
+              <textarea class="inv-input inv-field-value inv-autogrow" dir="ltr" inputmode="tel" data-field="seller.phone" aria-label="تلفن فروشنده" rows="1"></textarea>
             </div>
           </div>
         </div>
@@ -251,15 +251,15 @@
             </div>
             <div class="inv-field inv-field-wide inv-field-postal">
               <span class="inv-field-label">کد پستی</span>
-              <input type="text" class="inv-input inv-field-value" dir="ltr" data-field="buyer.postalCode" aria-label="کد پستی خریدار" placeholder="—" />
+              <input type="text" inputmode="numeric" class="inv-input inv-field-value" dir="ltr" data-field="buyer.postalCode" aria-label="کد پستی خریدار" placeholder="—" />
             </div>
             <div class="inv-field inv-field-wide">
               <span class="inv-field-label">شناسه ملی</span>
-              <input type="text" class="inv-input inv-field-value" dir="ltr" data-field="buyer.nationalId" aria-label="شناسه ملی خریدار" placeholder="—" />
+              <input type="text" inputmode="numeric" class="inv-input inv-field-value" dir="ltr" data-field="buyer.nationalId" aria-label="شناسه ملی خریدار" placeholder="—" />
             </div>
             <div class="inv-field inv-field-wide">
               <span class="inv-field-label">تلفن</span>
-              <textarea class="inv-input inv-field-value inv-autogrow" dir="ltr" data-field="buyer.phone" aria-label="تلفن خریدار" rows="1" placeholder="—"></textarea>
+              <textarea class="inv-input inv-field-value inv-autogrow" dir="ltr" inputmode="tel" data-field="buyer.phone" aria-label="تلفن خریدار" rows="1" placeholder="—"></textarea>
             </div>
           </div>
         </div>
@@ -349,7 +349,7 @@
       -->
       <footer class="inv-footer">
         <p class="inv-footer-site">
-          <input type="text" class="inv-input inv-footer-site-input" dir="auto" data-field="company.website" aria-label="متن فوتر" placeholder="متن فوتر را وارد کنید" />
+          <input type="text" inputmode="url" class="inv-input inv-footer-site-input" dir="auto" data-field="company.website" aria-label="متن فوتر" placeholder="متن فوتر را وارد کنید" />
         </p>
       </footer>
 
@@ -397,11 +397,11 @@
         </label>
         <label class="company-editor-field company-editor-field-wide">
           <span>تلفن</span>
-          <input type="text" id="company-editor-phones" autocomplete="off" />
+          <input type="text" id="company-editor-phones" inputmode="tel" autocomplete="off" />
         </label>
         <label class="company-editor-field company-editor-field-wide">
           <span>وب‌سایت</span>
-          <input type="text" id="company-editor-website" dir="ltr" />
+          <input type="text" id="company-editor-website" dir="ltr" inputmode="url" />
         </label>
       </div>
       <div class="company-logo-control">

@@ -259,6 +259,42 @@
     if (resolve) resolve(result || { action: "cancel", value: "" });
   }
 
+  var DIALOG_FOCUSABLE_SELECTOR =
+    'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  // offsetParent is null for anything display:none (or an ancestor that is),
+  // which is exactly how hidden dialog rows (the reset/delete buttons,
+  // is-empty fields) are excluded here without special-casing them.
+  function focusableDialogElements(container) {
+    var nodes = container.querySelectorAll(DIALOG_FOCUSABLE_SELECTOR);
+    return Array.prototype.filter.call(nodes, function (el) {
+      return el.offsetParent !== null;
+    });
+  }
+
+  // #app-dialog and #company-editor-dialog are both aria-modal="true", which
+  // is a lie unless Tab is actually kept inside them — otherwise it walks
+  // straight into the (visually hidden-behind-backdrop but still focusable)
+  // page underneath. Only one of the two is ever open at a time.
+  function trapDialogTab(e) {
+    var dialog = !appDialogEl.hidden ? appDialogEl : (!companyEditorDialogEl.hidden ? companyEditorDialogEl : null);
+    if (!dialog) return;
+    var focusable = focusableDialogElements(dialog);
+    if (!focusable.length) return;
+    var first = focusable[0];
+    var last = focusable[focusable.length - 1];
+    var active = document.activeElement;
+    if (e.shiftKey) {
+      if (active === first || !dialog.contains(active)) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else if (active === last || !dialog.contains(active)) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
   function showAppDialog(options) {
     options = options || {};
     // A second dialog can be requested while one is still open — Ctrl+S with
@@ -3628,7 +3664,7 @@
     // Keyboard shortcuts: Ctrl+S saves to the browser list (instead of the
     // browser's useless "save page" dialog), Ctrl+P routes through the same
     // font-safe print path as the toolbar button, Escape closes the
-    // saved-invoices panel.
+    // saved-invoices panel, Tab is kept inside whichever app-dialog is open.
     document.addEventListener("keydown", function (e) {
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
         var k = e.key.toLowerCase();
@@ -3644,6 +3680,8 @@
         if (!companyEditorDialogEl.hidden) closeCompanyEditor();
         closeSavedPanel();
         closeSettingsPanel();
+      } else if (e.key === "Tab") {
+        trapDialogTab(e);
       }
     });
 
