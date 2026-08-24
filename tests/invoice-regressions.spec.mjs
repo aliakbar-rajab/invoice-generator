@@ -208,6 +208,52 @@ test("automatic print orientation changes update dirty and save-status UI", asyn
   await expect(page.locator("#toolbar-status")).not.toContainText("ذخیره شد");
 });
 
+test("an unusually large row total shrinks its own font to stay fully visible, never truncated or wrapped", async ({ page }) => {
+  await openApp(page);
+
+  // A 15-digit unit price renders a total far wider than the fixed-width
+  // total column at the document's normal font-size (see FIT_MIN_SCALE /
+  // fitNumericEl in app.js) — this must shrink just that cell's font until
+  // the whole number fits, never truncate/ellipsize it, wrap it, or resize
+  // the column, and it must land above the emergency floor that the
+  // "عمودی" overflow test above deliberately blows past.
+  const hugePrice = "999999999999999";
+  await fillValidFirstRow(page, hugePrice);
+
+  const rows = page.locator("#inv-rows tr");
+  const totalCell = rows.first().locator('[data-row-computed="total"]');
+  await expect(totalCell).toHaveText("۹۹۹٬۹۹۹٬۹۹۹٬۹۹۹٬۹۹۹");
+
+  // An untouched row's total cell carries no inline font-size, so its
+  // computed size is the true, un-shrunk baseline to compare against —
+  // avoids pinning the assertion to a hardcoded pixel value.
+  const baseFontSize = await rows.nth(1)
+    .locator('[data-row-computed="total"]')
+    .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+
+  const metrics = await totalCell.evaluate((el) => ({
+    fontSize: parseFloat(getComputedStyle(el).fontSize),
+    scrollWidth: el.scrollWidth,
+    clientWidth: el.clientWidth,
+    isOverflowing: el.classList.contains("numeric-overflow"),
+  }));
+
+  expect(metrics.isOverflowing, "must not fall back to the overflow state").toBe(false);
+  expect(metrics.scrollWidth, "the full number must stay inside the cell, not get clipped")
+    .toBeLessThanOrEqual(metrics.clientWidth + 1);
+  expect(metrics.fontSize, "font-size must shrink to make room for the large number")
+    .toBeLessThan(baseFontSize);
+  expect(metrics.fontSize, "shrink must stop at a readable floor, not collapse toward zero")
+    .toBeGreaterThan(baseFontSize * 0.5);
+
+  // table-layout: fixed keeps every row's total column the same width
+  // regardless of content — confirm the huge value never grew it.
+  const totalCellWidths = await rows.locator('[data-row-computed="total"]').evaluateAll(
+    (els) => els.map((el) => el.clientWidth)
+  );
+  expect(new Set(totalCellWidths).size, "column width must stay uniform across rows").toBe(1);
+});
+
 test("a very long amount-in-words wraps instead of overflowing the box, sheet, or printed page", async ({ page }) => {
   await openApp(page);
   // A 15-digit unit price makes rialToWordsBig() emit a sentence far longer
