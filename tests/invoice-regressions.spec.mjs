@@ -129,6 +129,146 @@ test("deleting in one tab preserves invoices saved concurrently in another", asy
   await context.close();
 });
 
+// ---------------------------------------------------------------------------
+// Optimistic conflict detection: two tabs editing the SAME saved entry.
+// Without a version check, the second tab's Save silently clobbers whatever
+// the first tab already saved, discarding it with no trace.
+// ---------------------------------------------------------------------------
+
+async function openFirstSavedEntry(page) {
+  await page.locator("#btn-saved-list").click();
+  await page.locator(".saved-item-actions button", { hasText: "باز کردن" }).first().click();
+}
+
+test("saving over an entry another tab already saved a newer version of warns before overwriting", async ({ browser }) => {
+  const context = await browser.newContext({ locale: "fa-IR", timezoneId: "Asia/Tehran" });
+  const pageA = await context.newPage();
+  await openApp(pageA);
+  await fillValidFirstRow(pageA);
+  await pageA.getByLabel("نام خریدار", { exact: true }).fill("خریدار اصلی");
+  await saveNamed(pageA, "سند مشترک");
+
+  // Tab B opens the very same saved entry.
+  const pageB = await context.newPage();
+  await openApp(pageB);
+  await openFirstSavedEntry(pageB);
+  await expect(pageB.getByLabel("نام خریدار", { exact: true })).toHaveValue("خریدار اصلی");
+
+  // Tab A edits and re-saves (same entry, no naming dialog this time).
+  await pageA.getByLabel("نام خریدار", { exact: true }).fill("ویرایش الف");
+  await pageA.getByRole("button", { name: "ذخیره", exact: true }).click();
+  await expect(pageA.locator("#toolbar-status")).toContainText("ذخیره شد");
+
+  // Tab B, still holding the version from before A's save, edits something
+  // else and tries to save. It must be warned, not silently overwrite.
+  await pageB.locator('[data-field="notes"]').fill("یادداشت ب");
+  await pageB.getByRole("button", { name: "ذخیره", exact: true }).click();
+  await expect(pageB.locator("#app-dialog")).toBeVisible();
+  await expect(pageB.locator("#app-dialog-message")).toContainText(
+    "این سند در برگهٔ دیگری تغییر کرده است. آیا می‌خواهید تغییرات فعلی جایگزین نسخهٔ جدید شوند؟"
+  );
+
+  // Confirming the overwrite persists tab B's own full document (its buyer
+  // name is still whatever B loaded, since B never touched that field) -
+  // it explicitly replaces A's saved version, exactly as the user agreed to.
+  await pageB.locator("#app-dialog-actions button.danger").click();
+  await expect(pageB.locator("#toolbar-status")).toContainText("ذخیره شد");
+
+  const pageC = await context.newPage();
+  await openApp(pageC);
+  await openFirstSavedEntry(pageC);
+  await expect(pageC.getByLabel("نام خریدار", { exact: true })).toHaveValue("خریدار اصلی");
+  await expect(pageC.locator('[data-field="notes"]')).toHaveValue("یادداشت ب");
+  await context.close();
+});
+
+test("cancelling the conflict dialog keeps the other tab's saved version AND this tab's unsaved edits", async ({ browser }) => {
+  const context = await browser.newContext({ locale: "fa-IR", timezoneId: "Asia/Tehran" });
+  const pageA = await context.newPage();
+  await openApp(pageA);
+  await fillValidFirstRow(pageA);
+  await pageA.getByLabel("نام خریدار", { exact: true }).fill("خریدار اصلی");
+  await saveNamed(pageA, "سند مشترک دوم");
+
+  const pageB = await context.newPage();
+  await openApp(pageB);
+  await openFirstSavedEntry(pageB);
+
+  await pageA.getByLabel("نام خریدار", { exact: true }).fill("نسخهٔ نهایی الف");
+  await pageA.getByRole("button", { name: "ذخیره", exact: true }).click();
+  await expect(pageA.locator("#toolbar-status")).toContainText("ذخیره شد");
+
+  await pageB.locator('[data-field="notes"]').fill("یادداشت ناتمام ب");
+  await pageB.getByRole("button", { name: "ذخیره", exact: true }).click();
+  await expect(pageB.locator("#app-dialog")).toBeVisible();
+  await pageB.locator("#app-dialog-actions button", { hasText: "انصراف" }).click();
+
+  // B's own unsaved edit is still sitting right there in the editor.
+  await expect(pageB.locator('[data-field="notes"]')).toHaveValue("یادداشت ناتمام ب");
+  await expect(pageB.locator("#status-dot")).toHaveClass(/is-dirty/);
+  await expect(pageB.locator("#toolbar-status")).toContainText("سند در برگهٔ دیگری تغییر کرده است");
+
+  // And storage still holds exactly A's version - nothing was overwritten.
+  const pageC = await context.newPage();
+  await openApp(pageC);
+  await openFirstSavedEntry(pageC);
+  await expect(pageC.getByLabel("نام خریدار", { exact: true })).toHaveValue("نسخهٔ نهایی الف");
+  await expect(pageC.locator('[data-field="notes"]')).toHaveValue("");
+  await context.close();
+});
+
+test("repeated saves in the same tab never produce a false conflict", async ({ page }) => {
+  await openApp(page);
+  await fillValidFirstRow(page);
+  await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار یک");
+  await saveNamed(page, "سند تکراری");
+
+  // Several normal same-tab re-saves in a row: each one's own successful
+  // save must become the new baseline, so the next one never conflicts
+  // with itself.
+  for (const buyer of ["خریدار دو", "خریدار سه", "خریدار چهار"]) {
+    await page.getByLabel("نام خریدار", { exact: true }).fill(buyer);
+    await page.getByRole("button", { name: "ذخیره", exact: true }).click();
+    await expect(page.locator("#app-dialog")).toBeHidden();
+    await expect(page.locator("#toolbar-status")).toContainText("ذخیره شد");
+  }
+});
+
+test("an entry deleted in another tab still falls through to save-as-new, not a conflict prompt", async ({ browser }) => {
+  const context = await browser.newContext({ locale: "fa-IR", timezoneId: "Asia/Tehran" });
+  const pageA = await context.newPage();
+  await openApp(pageA);
+  await fillValidFirstRow(pageA);
+  await pageA.getByLabel("نام خریدار", { exact: true }).fill("خریدار در معرض حذف");
+  await saveNamed(pageA, "سند فانی");
+
+  const pageB = await context.newPage();
+  await openApp(pageB);
+  await openFirstSavedEntry(pageB);
+
+  // Tab A deletes the entry pageB has open.
+  await pageA.locator("#btn-saved-list").click();
+  await pageA.locator(".saved-item-actions button.danger").click();
+  await pageA.locator("#app-dialog-actions button.danger").click();
+  await expect(pageA.locator("#toolbar-status")).toContainText("حذف شد");
+
+  // Tab B edits and saves: no such entry exists any more, so this must be
+  // the ordinary "save as a new entry" flow (naming dialog), never the
+  // "changed in another tab" conflict prompt.
+  await pageB.locator('[data-field="notes"]').fill("یادداشت پس از حذف");
+  await pageB.getByRole("button", { name: "ذخیره", exact: true }).click();
+  await expect(pageB.locator("#app-dialog")).toBeVisible();
+  await expect(pageB.locator("#app-dialog-title")).toHaveText("نام سند");
+  await expect(pageB.locator("#app-dialog-input-wrap")).toBeVisible();
+  await pageB.locator("#app-dialog-actions button").first().click();
+  await expect(pageB.locator("#toolbar-status")).toContainText("ذخیره شد");
+
+  const entries = await pageB.evaluate(() => Object.keys(localStorage)
+    .filter((key) => key.indexOf("preinvoice.saved.entry.") === 0));
+  expect(entries).toHaveLength(1);
+  await context.close();
+});
+
 test("malformed legacy storage stays recoverable and cannot break or be overwritten by new saves", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("preinvoice.saved.v1", "null");

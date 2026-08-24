@@ -32,6 +32,13 @@
   // on New / Open-from-file so those always start a fresh entry on next Save.
   var currentSavedId = null;
   var currentSavedName = "";
+  // The `savedAt` of the saved-list entry as last seen by this tab (from
+  // opening it or from this tab's own last successful save). null whenever
+  // currentSavedId is null. Compared against the entry actually in storage
+  // right before an overwrite, so a save can tell "nothing changed since I
+  // last saw this entry" apart from "another tab saved a newer version
+  // while I wasn't looking" — see the conflict check in saveCurrentInner.
+  var currentSavedVersion = null;
   var isDirty = false;
   var validationRequested = false;
   var stampRequested = true;
@@ -2554,6 +2561,26 @@
 
     if (!isNewEntry) {
       name = list[currentSavedId].name;
+      // Optimistic conflict check: `list` was just loaded fresh above, so
+      // list[currentSavedId].savedAt is whatever is in storage RIGHT NOW.
+      // currentSavedVersion is whatever this tab last saw (on open, or on
+      // this tab's own last successful save). A mismatch means some other
+      // tab saved a newer version of this exact entry in between — silently
+      // persisting over it would discard that tab's changes with no trace.
+      if (currentSavedVersion != null && list[currentSavedId].savedAt !== currentSavedVersion) {
+        var keepOverwriting = await confirmApp(
+          "تغییر همزمان سند",
+          "این سند در برگهٔ دیگری تغییر کرده است. آیا می‌خواهید تغییرات فعلی جایگزین نسخهٔ جدید شوند؟",
+          "جایگزینی",
+          true
+        );
+        // Cancel: touch neither the stored (other tab's) version nor this
+        // tab's own unsaved edits — just stop before persistSavedEntry runs.
+        if (!keepOverwriting) {
+          setStatus("ذخیره انجام نشد؛ سند در برگهٔ دیگری تغییر کرده است.");
+          return false;
+        }
+      }
     } else {
       var suggested = currentSavedName || suggestEntryName(data);
       var result = await showAppDialog({
@@ -2576,10 +2603,11 @@
       // entered and imported numbers remain exactly as authored.
       refreshLiveInvoiceNumber();
       data = collectInvoiceData();
+      var savedAt = Date.now();
       persistSavedEntry({
         id: currentSavedId,
         name: name,
-        savedAt: Date.now(),
+        savedAt: savedAt,
         data: dataForBrowserStorage(data),
       });
       // Commit every valid daily-format number, not only untouched automatic
@@ -2590,6 +2618,10 @@
       dateIsAutoSuggested = false;
       validityIsAutoSuggested = false;
       currentSavedName = name;
+      // This tab's own save is now the version of record; a normal next
+      // save in the same tab must compare against this, not the one that
+      // was current when the entry was opened.
+      currentSavedVersion = savedAt;
       isDirty = false;
       defaultRowCountManaged = false;
       renderSavedList();
@@ -2619,6 +2651,7 @@
     applyInvoiceData(entry.data);
     currentSavedId = id;
     currentSavedName = entry.name;
+    currentSavedVersion = entry.savedAt;
     isDirty = false;
     numberIsAutoSuggested = false;
     setStatus("سند ذخیره‌شده باز شد.");
@@ -2645,6 +2678,7 @@
     if (currentSavedId === id) {
       currentSavedId = null;
       currentSavedName = "";
+      currentSavedVersion = null;
     }
 
     renderSavedList();
@@ -2796,6 +2830,7 @@
     // was last open in the browser.
     currentSavedId = null;
     currentSavedName = "";
+    currentSavedVersion = null;
     isDirty = false;
     // The number came from the opened file, not a live suggestion — switching
     // companies afterward must not overwrite it.
@@ -3357,6 +3392,7 @@
       applyInvoiceData(blankInvoice(), { manageDefaultRows: true });
       currentSavedId = null;
       currentSavedName = "";
+      currentSavedVersion = null;
       isDirty = false;
       numberIsAutoSuggested = true;
       dateIsAutoSuggested = true;
@@ -3704,6 +3740,7 @@
     applyInvoiceData(blankInvoice(), { manageDefaultRows: true });
     currentSavedId = null;
     currentSavedName = "";
+    currentSavedVersion = null;
     numberIsAutoSuggested = true;
     dateIsAutoSuggested = true;
     validityIsAutoSuggested = true;
