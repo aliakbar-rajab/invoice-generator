@@ -704,9 +704,12 @@ body {
 
 /* Headers stay centered (the base `.inv-table th, .inv-table td` rule
    above) regardless of how each column's own data cells are aligned below.
-   Right-align the description column so its prose reads naturally; every
-   numeric column (qty/price/discount/computed totals) is left-aligned so
-   figures read as a scannable ledger, unit stays centered (short token). */
+   Selectors key off each cell's `data-row-field`/`data-row-computed`
+   attribute rather than column position, so a cloned row (see createRow in
+   app.js) always lands in the right alignment no matter how rows are
+   added/removed. Description reads as right-aligned prose; qty and unit
+   stay centered (short tokens); the four money columns (unit price, total,
+   discount, net) are right-aligned so figures read as a scannable ledger. */
 .inv-table td:has(.cell-input[data-row-field="description"]) {
   text-align: right;
   /* Prose, not a figure: wrap between words and only break inside one when a
@@ -714,9 +717,15 @@ body {
   overflow-wrap: break-word;
 }
 
-.inv-table td:has(.cell-input-num),
+.inv-table td:has(.cell-input[data-row-field="quantity"]),
+.inv-table td:has(.cell-input[data-row-field="unit"]) {
+  text-align: center;
+}
+
+.inv-table td:has(.cell-input[data-row-field="unitPrice"]),
+.inv-table td:has(.cell-input[data-row-field="discount"]),
 .inv-table td[data-row-computed] {
-  text-align: left;
+  text-align: right;
 }
 
 /*
@@ -1182,10 +1191,15 @@ body {
   text-align: center;
 }
 
-/* qty/price/discount: a physical value, not `inherit`/`start`, so alignment
-   can't drift with the field's resolved bidi direction while typing digits. */
-.inv-table .cell-input.cell-input-num {
-  text-align: left;
+/* Unit price & discount are money figures, right-aligned like the computed
+   total/net columns beside them. Quantity keeps the default center (set on
+   `.cell-input` above) since it's a short token, not a ledger figure.
+   Right, not `inherit`/`end`, so alignment can't drift with the field's
+   resolved bidi direction while typing digits. Keyed off data-row-field
+   (column identity) rather than position, so it survives row add/remove. */
+.inv-table .cell-input[data-row-field="unitPrice"],
+.inv-table .cell-input[data-row-field="discount"] {
+  text-align: right;
 }
 
 .inv-table td:has(.cell-input[data-row-field="description"]) .cell-input {
