@@ -1,0 +1,72 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "invoice-telegram",
+	"main": "src/index.js",
+	"compatibility_date": "2026-08-20",
+	"compatibility_flags": ["nodejs_compat"],
+	"observability": {
+		"enabled": true
+	},
+	"upload_source_maps": true,
+	/**
+	 * Smart Placement
+	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
+	 */
+	// "placement": {  "mode": "smart" }
+	/**
+	 * Bindings
+	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
+	 * databases, object storage, AI inference, real-time communication and more.
+	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
+	 */
+	/**
+	 * Environment Variables
+	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
+	 * Note: Use secrets to store sensitive data.
+	 * https://developers.cloudflare.com/workers/configuration/secrets/
+	 */
+	// "vars": {  "MY_VARIABLE": "production_value" }
+	/**
+	 * Static Assets (invoice logos, stamps, embedded font — read at runtime via
+	 * env.ASSETS.fetch() and inlined as data: URIs into the PDF HTML so the
+	 * headless browser needs no network access to render it)
+	 * https://developers.cloudflare.com/workers/static-assets/binding/
+	 */
+	"assets": {
+		"directory": "./public/",
+		"binding": "ASSETS",
+		"not_found_handling": "none"
+	},
+	/**
+	 * Durable Objects — one InvoiceSession instance per Telegram chat, holding
+	 * the conversation's draft invoice. This is the durable state store; the
+	 * Worker itself never keeps conversation state in memory.
+	 * https://developers.cloudflare.com/durable-objects/
+	 */
+	"durable_objects": {
+		"bindings": [
+			{ "name": "INVOICE_SESSION", "class_name": "InvoiceSession" },
+			{ "name": "INVOICE_COUNTER", "class_name": "InvoiceCounter" }
+		]
+	},
+	"migrations": [
+		{ "tag": "v1", "new_sqlite_classes": ["InvoiceSession", "InvoiceCounter"] }
+	],
+	/**
+	 * Browser Rendering — headless Chromium used to turn the invoice HTML
+	 * (built from the desktop app's own print design) into the final A4 PDF.
+	 * https://developers.cloudflare.com/browser-rendering/
+	 */
+	"browser": {
+		"binding": "BROWSER"
+	}
+	/**
+	 * Service Bindings (communicate between multiple Workers)
+	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
+	 */
+	// "services": [  {   "binding": "MY_SERVICE",   "service": "my-service"  } ]
+}
