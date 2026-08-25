@@ -300,7 +300,7 @@ html, body {
 .inv-table th:nth-child(1) { padding-inline: 0.8mm; white-space: nowrap; }
 .inv-table tbody tr:last-child td { border-bottom: none; }
 
-.inv-table td.col-desc { text-align: right; overflow-wrap: break-word; }
+.inv-table td.col-desc { text-align: center; overflow-wrap: break-word; }
 .inv-table td.col-qty, .inv-table td.col-unit,
 .inv-table td.col-price, .inv-table td.col-discount,
 .inv-table td.col-total, .inv-table td.col-net { text-align: center; }

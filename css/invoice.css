@@ -707,11 +707,10 @@ body {
    Selectors key off each cell's `data-row-field`/`data-row-computed`
    attribute rather than column position, so a cloned row (see createRow in
    app.js) always lands in the right alignment no matter how rows are
-   added/removed. Description reads as right-aligned prose; qty and unit
-   stay centered (short tokens); the four money columns (unit price, total,
-   discount, net) are centered too, matching qty/unit. */
+   added/removed. Every column is centered, description included; qty, unit
+   and the four money columns (unit price, total, discount, net) match it. */
 .inv-table td:has(.cell-input[data-row-field="description"]) {
-  text-align: right;
+  text-align: center;
   /* Prose, not a figure: wrap between words and only break inside one when a
      single word genuinely cannot fit. */
   overflow-wrap: break-word;
@@ -1202,7 +1201,7 @@ body {
 }
 
 .inv-table td:has(.cell-input[data-row-field="description"]) .cell-input {
-  text-align: start;
+  text-align: center;
 }
 
 .inv-input:focus,
