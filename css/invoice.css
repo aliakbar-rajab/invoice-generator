@@ -709,7 +709,7 @@ body {
    app.js) always lands in the right alignment no matter how rows are
    added/removed. Description reads as right-aligned prose; qty and unit
    stay centered (short tokens); the four money columns (unit price, total,
-   discount, net) are right-aligned so figures read as a scannable ledger. */
+   discount, net) are centered too, matching qty/unit. */
 .inv-table td:has(.cell-input[data-row-field="description"]) {
   text-align: right;
   /* Prose, not a figure: wrap between words and only break inside one when a
@@ -725,7 +725,7 @@ body {
 .inv-table td:has(.cell-input[data-row-field="unitPrice"]),
 .inv-table td:has(.cell-input[data-row-field="discount"]),
 .inv-table td[data-row-computed] {
-  text-align: right;
+  text-align: center;
 }
 
 /*
@@ -1191,15 +1191,14 @@ body {
   text-align: center;
 }
 
-/* Unit price & discount are money figures, right-aligned like the computed
-   total/net columns beside them. Quantity keeps the default center (set on
-   `.cell-input` above) since it's a short token, not a ledger figure.
-   Right, not `inherit`/`end`, so alignment can't drift with the field's
-   resolved bidi direction while typing digits. Keyed off data-row-field
-   (column identity) rather than position, so it survives row add/remove. */
+/* Unit price & discount are money figures, centered like the computed
+   total/net columns beside them and like quantity/unit. Centered, not
+   `inherit`/`end`, so alignment can't drift with the field's resolved bidi
+   direction while typing digits. Keyed off data-row-field (column identity)
+   rather than position, so it survives row add/remove. */
 .inv-table .cell-input[data-row-field="unitPrice"],
 .inv-table .cell-input[data-row-field="discount"] {
-  text-align: right;
+  text-align: center;
 }
 
 .inv-table td:has(.cell-input[data-row-field="description"]) .cell-input {
