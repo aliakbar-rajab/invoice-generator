@@ -762,11 +762,9 @@ test("the header logo is fetched once, from the active profile only", async ({ p
   const logos = assetRequests.filter((name) => name.includes("logo"));
   expect(logos).toEqual(["logo-foulad-bonyan-mark.png"]);
   const rendered = await page.evaluate(() => ({
-    logo: document.getElementById("inv-logo").getAttribute("src"),
-    watermark: document.getElementById("inv-watermark").getAttribute("src")
+    logo: document.getElementById("inv-logo").getAttribute("src")
   }));
   expect(rendered.logo).toBe("assets/logo-foulad-bonyan-mark.png");
-  expect(rendered.watermark).toBe("assets/logo-foulad-bonyan-mark.png");
 });
 
 // Seeds an overridden built-in profile, then opens its editor ready to reset.

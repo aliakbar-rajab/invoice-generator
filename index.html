@@ -6,7 +6,6 @@
 <title>پیش‌فاکتور آفلاین</title>
 <link rel="stylesheet" href="css/invoice.css" />
 <link rel="stylesheet" href="css/app.css" />
-<link rel="stylesheet" href="css/refinements.css" />
 <style id="page-size-style">@page { size: A4 landscape; margin: 0; }</style>
 </head>
 <body>
@@ -172,13 +171,12 @@
 
   <main class="sheet-viewport">
     <div class="sheet-scale-wrapper" id="sheet-scale-wrapper">
-    <article class="invoice-sheet orientation-landscape" id="invoice-sheet" dir="rtl" data-company="fouladBonyan">
+    <article class="invoice-sheet orientation-landscape" id="invoice-sheet" dir="rtl">
 
       <!-- No src here (nor on #inv-logo below): setCompanyBranding() assigns
            the selected company profile's own asset during boot, before first
            paint. A hardcoded default would be a second, discarded download of
            a logo the active profile may not even use. -->
-      <img class="inv-watermark" id="inv-watermark" alt="" aria-hidden="true" />
 
       <header class="inv-head">
         <p class="inv-doc-title inv-editable-field" contenteditable="true" role="textbox" aria-label="عنوان سند" spellcheck="false" data-field="meta.title" data-placeholder="عنوان سند">پیش‌فاکتور</p>

@@ -1,18 +1,18 @@
 /*
  * Print stylesheet for the generated invoice PDF — adapted from the desktop
- * invoice app's css/invoice.css AND css/refinements.css (landscape sheet
- * only; the two companies' built-in profiles are the only ones this bot
- * ever renders). The desktop app loads both files (index.html), with
- * refinements.css cascading on top and overriding several base rules —
- * notably .inv-summary's/.inv-footer's spacing below the items table — so
- * both sources must stay in sync here, not just invoice.css alone. This
- * build has no editable/interactive state, so the desktop files' `@media
- * print`/`.print-page` overrides (which turn editable fields back into
- * plain print output) are folded into the base rules here instead of being
- * conditional.
+ * invoice app's css/invoice.css (landscape sheet only; the two companies'
+ * built-in profiles are the only ones this bot ever renders). Note that the
+ * file's trailing "print-first refinement layer" overrides several earlier
+ * base rules — notably .inv-summary's/.inv-footer's spacing below the items
+ * table — so it is the LATER of the two definitions that must be mirrored
+ * here. (Those refinements lived in a separate css/refinements.css until it
+ * was folded into invoice.css.) This build has no editable/interactive
+ * state, so the desktop file's `@media print`/`.print-page` overrides
+ * (which turn editable fields back into plain print output) are folded into
+ * the base rules here instead of being conditional.
  *
  * Visual design — including the monochrome palette and toner-banding
- * rationale — is unchanged from the original; see those files' own
+ * rationale — is unchanged from the original; see that file's own
  * comments for the reasoning. Only inputs/textareas are swapped for plain
  * elements and the delete-row column is dropped outright (there's nothing
  * to delete in a finished PDF).

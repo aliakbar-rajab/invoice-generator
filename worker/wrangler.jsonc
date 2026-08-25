@@ -7,29 +7,13 @@
 	"name": "invoice-telegram",
 	"main": "src/index.js",
 	"compatibility_date": "2026-08-20",
+	// Required by @cloudflare/puppeteer: its globalPatcher imports
+	// "node:buffer" at module scope to install globalThis.Buffer.
 	"compatibility_flags": ["nodejs_compat"],
 	"observability": {
 		"enabled": true
 	},
 	"upload_source_maps": true,
-	/**
-	 * Smart Placement
-	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
-	 */
-	// "placement": {  "mode": "smart" }
-	/**
-	 * Bindings
-	 * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
-	 * databases, object storage, AI inference, real-time communication and more.
-	 * https://developers.cloudflare.com/workers/runtime-apis/bindings/
-	 */
-	/**
-	 * Environment Variables
-	 * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
-	 * Note: Use secrets to store sensitive data.
-	 * https://developers.cloudflare.com/workers/configuration/secrets/
-	 */
-	// "vars": {  "MY_VARIABLE": "production_value" }
 	/**
 	 * Static Assets (invoice logos, stamps, embedded font — read at runtime via
 	 * env.ASSETS.fetch() and inlined as data: URIs into the PDF HTML so the
@@ -64,9 +48,4 @@
 	"browser": {
 		"binding": "BROWSER"
 	}
-	/**
-	 * Service Bindings (communicate between multiple Workers)
-	 * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
-	 */
-	// "services": [  {   "binding": "MY_SERVICE",   "service": "my-service"  } ]
 }

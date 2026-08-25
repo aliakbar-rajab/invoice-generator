@@ -7,7 +7,7 @@ import { COMPANIES } from "../src/lib/companies.js";
 // Regression test for the bot's Telegram/PDF render path (buildInvoiceHtml +
 // invoiceStyles). The real desktop invoice app leaves a deliberate 2mm gap
 // between the items table and the totals/notes/signature block below it
-// (css/refinements.css: ".inv-summary { margin-top: 2mm; }") — a rule the
+// (css/invoice.css: ".inv-summary { margin-top: 2mm; }") — a rule the
 // bot's adapted stylesheet once dropped entirely, gluing the two sections
 // together. This renders the bot's actual HTML output in a real browser
 // (not jsdom/workerd, neither of which run layout) and measures the

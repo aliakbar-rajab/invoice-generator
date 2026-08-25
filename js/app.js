@@ -136,17 +136,17 @@
   });
 
   // ---------- Document fonts ----------
-  // One approved corporate typeface. The key is written to html[data-font]
-  // at boot, where the matching selector in invoice.css sets --doc-font.
-  // The user-facing font picker was removed; this constant and the
-  // html[data-font="vazirmatn"] rule are the only two places left that
-  // have to agree.
+  // One approved corporate typeface. The user-facing font picker is gone and
+  // the per-font html[data-font] selectors with it — invoice.css now sets
+  // --doc-font on :root unconditionally. The key is still written to
+  // html[data-font] at boot (see setFont) and still recorded in saved
+  // documents, purely so older files keep round-tripping unchanged.
   var DEFAULT_FONT_KEY = "vazirmatn";
 
   // ---------- Document font size ----------
   // A plain multiplier on --doc-font-scale (see invoice.css), set directly
   // as an inline custom property rather than a data-attribute since it's a
-  // continuous percentage, not a fixed enum like the font family above.
+  // continuous percentage. Fixed at 1 since the size picker was removed.
   var DEFAULT_FONT_SCALE = 1;
 
   // ---------- Invoice validity ("اعتبار پیش‌فاکتور") ----------
@@ -165,7 +165,6 @@
   var pageStyleEl = document.getElementById("page-size-style");
   var logoEl = document.getElementById("inv-logo");
   var logoChipEl = logoEl.parentElement;
-  var watermarkEl = document.getElementById("inv-watermark");
   var scaleWrapperEl = document.getElementById("sheet-scale-wrapper");
   var stampEl = document.getElementById("inv-stamp");
   var stampAreaEl = stampEl.parentElement;
@@ -1131,22 +1130,18 @@
     fitStaticFields();
   }
 
-  // Logo, faint watermark and the per-company color theme (the
-  // data-company attribute drives the CSS custom-property theme in
-  // invoice.css) always change together — one helper so they can't drift.
+  // The header logo and its chip are shown or hidden together — one helper
+  // so the two can't drift apart.
   function setCompanyBranding(profileKey, profile) {
     if (profile.logo) {
       logoChipEl.hidden = false;
       logoEl.hidden = false;
       logoEl.setAttribute("src", profile.logo);
-      watermarkEl.setAttribute("src", profile.logo);
     } else {
       logoEl.hidden = true;
       logoChipEl.hidden = true;
       logoEl.removeAttribute("src");
-      watermarkEl.removeAttribute("src");
     }
-    sheet.setAttribute("data-company", COMPANY_PROFILES[profileKey] ? profileKey : DEFAULT_PROFILE_KEY);
   }
 
   // Unhide before every attempt so a previous load failure never sticks,
@@ -1514,9 +1509,10 @@
 
   // Both of these normalize a loaded document onto the single approved
   // typeface and scale: any `font` / `fontScale` carried by an older saved
-  // file is deliberately ignored. The picker UI they used to drive is gone,
-  // so each now writes only the CSS hook that actually has an effect
-  // (html[data-font] and --doc-font-scale, both consumed by invoice.css).
+  // file is deliberately ignored. The picker UI they used to drive is gone.
+  // --doc-font-scale is still consumed by invoice.css; html[data-font] no
+  // longer is, and is kept only so the attribute stays present for anything
+  // inspecting the document.
   function setFont() {
     document.documentElement.setAttribute("data-font", DEFAULT_FONT_KEY);
   }
@@ -1574,18 +1570,16 @@
     }
   }
 
-  // The actual metrics re-fit: font-size shrink for every static field plus
-  // the notes textarea's height. Only needed when something could have
-  // changed those fields' rendered widths — orientation changes, loading a
-  // document, fonts finishing load, or right before
-  // print — never on an ordinary row/tax keystroke, which can't touch any
-  // of these fields. recalcAll (below) calls this conditionally and always
-  // calls refreshEmptyStates on its own, so callers that only need the
-  // metrics pass (like applyCompanyProfile) can still call this directly.
+  // The metrics re-fit for the non-row parts of the sheet: textarea heights
+  // plus the is-empty states. Only needed when something could have changed
+  // those fields' rendered size — orientation changes, loading a document,
+  // fonts finishing load, or right before print — never on an ordinary
+  // row/tax keystroke, which can't touch any of these fields.
+  //
+  // Long-form editable prose wraps; it is never reduced to unreadable
+  // microtype, so no font-size shrink happens here. Only compact financial
+  // figures use fitNumericEl, with its conservative 82% floor.
   function fitStaticFields() {
-    // Long-form editable prose wraps; it is never reduced to unreadable
-    // microtype. Only compact financial figures use fitNumericEl, with a
-    // conservative 82% floor.
     autoGrowTextareas();
     refreshEmptyStates();
   }
@@ -1682,13 +1676,11 @@
       input.addEventListener("keydown", handleCellKeydown);
       if (field === "quantity" || field === "unitPrice" || field === "discount") {
         input.addEventListener("blur", function () {
-          this.dataset.touched = "true";
           reformatNumericCell(this, field);
           recalcAll({ skipStaticFit: true });
         });
       } else {
         input.addEventListener("blur", function () {
-          this.dataset.touched = "true";
           this.value = toPersianDigits(this.value);
           recalcAll({ skipStaticFit: true });
         });
@@ -1796,56 +1788,47 @@
 
   function strictMoney(value, emptyAsZero) {
     var normalized = normalizeStrictNumber(value);
-    if (normalized === null) return { valid: false, calculable: false, value: 0n };
-    if (!normalized && emptyAsZero) return { valid: true, calculable: true, value: 0n };
-    if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, calculable: false, value: 0n };
+    if (normalized === null) return { valid: false, value: 0n };
+    if (!normalized && emptyAsZero) return { valid: true, value: 0n };
+    if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, value: 0n };
     return {
       valid: /^\d+$/.test(normalized),
-      calculable: true,
       value: parseDecimalToBigIntScaled(normalized, 0),
     };
   }
 
   function strictQuantity(value) {
     var normalized = normalizeStrictNumber(value);
-    if (normalized === null) return { valid: false, calculable: false, value: 0n };
-    if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, calculable: false, value: 0n };
+    if (normalized === null) return { valid: false, value: 0n };
+    if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, value: 0n };
     var parsed = parseQtyMilli(normalized);
     return {
       valid: /^\d+(?:\.\d{1,3})?$/.test(normalized) && parsed > 0n,
-      calculable: true,
       value: parsed,
     };
   }
 
   function strictPercent(value) {
     var normalized = normalizeStrictNumber(value);
-    if (normalized === null) return { valid: false, calculable: false, value: 0n };
-    if (!normalized) return { valid: true, calculable: true, value: 0n };
-    if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, calculable: false, value: 0n };
+    if (normalized === null) return { valid: false, value: 0n };
+    if (!normalized) return { valid: true, value: 0n };
+    if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, value: 0n };
     var parsed = parsePercentBps(normalized);
     return {
       valid: /^\d+(?:\.\d{1,2})?$/.test(normalized) && parsed >= 0n && parsed <= 10000n,
-      calculable: true,
       value: parsed,
     };
   }
 
+  // Warnings belong in the single banner above the sheet. The only per-control
+  // state these two touch is the accessibility flag; a cell is never painted
+  // red and no message is ever injected into the invoice itself.
   function clearInlineError(input) {
-    var holder = input && (input.closest("td") || input.closest(".inv-field") || input.closest("dd"));
-    if (holder) {
-      holder.classList.remove("has-error");
-      holder.removeAttribute("data-error");
-    }
     if (input) input.removeAttribute("aria-invalid");
   }
 
   function setInlineError(input) {
     if (!input) return;
-    clearInlineError(input);
-    // Warnings belong in the single banner above the sheet. Keep only the
-    // accessibility state on the control; never paint a cell red or inject a
-    // message into the invoice itself.
     input.setAttribute("aria-invalid", "true");
   }
 
@@ -1863,7 +1846,6 @@
       syncRowAccessibility(tr, rowNumber);
       var blank = rowIsBlank(tr);
       tr.classList.toggle("is-blank-row", blank);
-      tr.classList.remove("has-financial-error");
 
       var descriptionInput = tr.querySelector('[data-row-field="description"]');
       var qtyInput = tr.querySelector('[data-row-field="quantity"]');
@@ -1994,13 +1976,6 @@
     if (statusDotEl) statusDotEl.classList.toggle("has-error", calculationErrors.length > 0);
   }
 
-  function clearStaticValidation() {
-    sheet.querySelectorAll(".inv-field.has-error, .inv-meta dd.has-error").forEach(function (holder) {
-      holder.classList.remove("has-error");
-      holder.removeAttribute("data-error");
-    });
-  }
-
   function requireField(selector, message, errors) {
     var input = document.querySelector(selector);
     if (input && !input.value.trim()) errors.push(message);
@@ -2021,7 +1996,6 @@
 
   function validateInvoiceForOutput() {
     validationRequested = true;
-    clearStaticValidation();
     recalcAll();
     var errors = calculationErrors.slice();
     requireField('[data-field="meta.date"]', "تاریخ پیش‌فاکتور وارد نشده است", errors);
@@ -2107,7 +2081,6 @@
           if (this.select) this.select();
         });
         el.addEventListener("blur", function () {
-          this.dataset.touched = "true";
           var percent = strictPercent(this.value);
           if (percent.valid) this.value = formatPercentBps(percent.value);
           recalcAll();
@@ -2122,7 +2095,6 @@
           });
         }
         el.addEventListener("blur", function () {
-          el.dataset.touched = "true";
           if (el.isContentEditable) el.textContent = toPersianDigits(el.textContent);
           else el.value = toPersianDigits(el.value);
           if (field === "meta.date") {
@@ -2941,7 +2913,7 @@
     rowSources.forEach(function (sourceRow, index) {
       var rowClone = sourceRow.cloneNode(true);
       copyLiveValues(sourceRow, rowClone);
-      rowClone.classList.remove("is-blank-row", "has-financial-error");
+      rowClone.classList.remove("is-blank-row");
       rowClone.querySelector(".row-index-badge").textContent = toPersianDigits((options.startIndex || 0) + index + 1);
       cloneBody.appendChild(rowClone);
     });
@@ -2971,10 +2943,6 @@
     }
 
     replaceFormControlsWithText(clone);
-    clone.querySelectorAll(".has-error").forEach(function (el) {
-      el.classList.remove("has-error");
-      el.removeAttribute("data-error");
-    });
     if (!stampRequested) {
       var clonedStamp = clone.querySelector(".inv-signature-stamp");
       if (clonedStamp) clonedStamp.remove();

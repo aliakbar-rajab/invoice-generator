@@ -19,3 +19,6 @@ node_modules/
 test-results/
 playwright-report/
 tmp/
+
+# Vendored agent skills — re-fetchable from skills-lock.json, not app source
+.agents/

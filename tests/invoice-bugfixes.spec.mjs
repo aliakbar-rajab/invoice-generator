@@ -349,7 +349,6 @@ test("a user-created company can be deleted and stays deleted", async ({ page })
   // by one the app no longer knows.
   await expect(page.locator("#company-profile")).toHaveValue("fouladBonyan");
   await expect(page.locator("#inv-company-name")).toHaveText("بنیان فولاد داریا");
-  await expect(page.locator("#invoice-sheet")).toHaveAttribute("data-company", "fouladBonyan");
 
   const stored = await page.evaluate((key) => ({
     profiles: JSON.parse(localStorage.getItem("preinvoice.companyProfiles.v1") || "{}"),
