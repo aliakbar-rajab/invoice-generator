@@ -37,3 +37,25 @@ export const COMPANY_ORDER = ["fouladBonyan", "karaBorjParseh"];
 export function getCompany(key) {
   return Object.prototype.hasOwnProperty.call(COMPANIES, key) ? COMPANIES[key] : null;
 }
+
+// User-typed company name ("ورود نام شرکت" at /start). Internally tagged with
+// the HTML/backend contract's "سایر" company type; that word is never shown
+// to the Telegram user — only the typed name is.
+export const OTHER_COMPANY_KEY = "other";
+const OTHER_COMPANY_TYPE = "سایر";
+
+export function buildCustomCompany(name) {
+  return {
+    key: OTHER_COMPANY_KEY,
+    type: OTHER_COMPANY_TYPE,
+    label: OTHER_COMPANY_TYPE,
+    logo: null,
+    stamp: null,
+    name,
+    nationalId: "",
+    address: "",
+    postalCode: "",
+    phones: "",
+    website: "",
+  };
+}

@@ -48,6 +48,10 @@ export function editMessageText(token, chatId, messageId, text, options = {}) {
   });
 }
 
+export function deleteMessage(token, chatId, messageId) {
+  return call(token, "deleteMessage", { chat_id: chatId, message_id: messageId });
+}
+
 export function answerCallbackQuery(token, callbackQueryId, options = {}) {
   return call(token, "answerCallbackQuery", {
     callback_query_id: callbackQueryId,

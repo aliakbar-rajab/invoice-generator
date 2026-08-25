@@ -80,11 +80,28 @@ function blankItemRow(index) {
  * @param {string} data.docDate - Persian-digit Jalali date
  * @param {string} data.validity - Persian-digit Jalali date or label
  * @param {string} data.buyerName
+ * @param {string} [data.buyerAddress]
+ * @param {string} [data.buyerPostalCode]
+ * @param {string} [data.buyerNationalId]
+ * @param {string} [data.buyerPhone]
  * @param {Array<{description:string, unit?:string, quantityMilli:bigint, unitPriceRial:bigint}>} data.items
  * @param {boolean} data.includeStamp
  */
 export function buildInvoiceHtml(data) {
-  const { company, fontDataUri, docNumber, docDate, validity, buyerName, items, includeStamp } = data;
+  const {
+    company,
+    fontDataUri,
+    docNumber,
+    docDate,
+    validity,
+    buyerName,
+    buyerAddress,
+    buyerPostalCode,
+    buyerNationalId,
+    buyerPhone,
+    items,
+    includeStamp,
+  } = data;
   const { lines, grossTotal, discountTotal, afterDiscountTotal, taxTotal, netTotal } = computeTotals(items);
 
   const realRowsHtml = lines.map((line, i) => itemRow(i + 1, line));
@@ -136,10 +153,10 @@ export function buildInvoiceHtml(data) {
       <header class="inv-card-head">${BUYER_ICON}مشخصات خریدار</header>
       <div class="inv-card-grid">
         ${partyField("نام شخص حقیقی / حقوقی", buyerName)}
-        ${partyField("نشانی", "")}
-        ${partyField("کد پستی", "", true)}
-        ${partyField("شناسه ملی", "", true)}
-        ${partyField("تلفن", "", true)}
+        ${partyField("نشانی", buyerAddress || "")}
+        ${partyField("کد پستی", buyerPostalCode || "", true)}
+        ${partyField("شناسه ملی", buyerNationalId || "", true)}
+        ${partyField("تلفن", buyerPhone || "", true)}
       </div>
     </div>
   </section>

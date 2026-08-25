@@ -1,16 +1,21 @@
 /*
  * Print stylesheet for the generated invoice PDF — adapted from the desktop
- * invoice app's css/invoice.css (landscape sheet only; the two companies'
- * built-in profiles are the only ones this bot ever renders). This build
- * has no editable/interactive state, so the desktop file's `@media print`
- * overrides (which turn editable fields back into plain print output) are
- * folded into the base rules here instead of being conditional.
+ * invoice app's css/invoice.css AND css/refinements.css (landscape sheet
+ * only; the two companies' built-in profiles are the only ones this bot
+ * ever renders). The desktop app loads both files (index.html), with
+ * refinements.css cascading on top and overriding several base rules —
+ * notably .inv-summary's/.inv-footer's spacing below the items table — so
+ * both sources must stay in sync here, not just invoice.css alone. This
+ * build has no editable/interactive state, so the desktop files' `@media
+ * print`/`.print-page` overrides (which turn editable fields back into
+ * plain print output) are folded into the base rules here instead of being
+ * conditional.
  *
  * Visual design — including the monochrome palette and toner-banding
- * rationale — is unchanged from the original; see that file's own comments
- * for the reasoning. Only inputs/textareas are swapped for plain elements
- * and the delete-row column is dropped outright (there's nothing to delete
- * in a finished PDF).
+ * rationale — is unchanged from the original; see those files' own
+ * comments for the reasoning. Only inputs/textareas are swapped for plain
+ * elements and the delete-row column is dropped outright (there's nothing
+ * to delete in a finished PDF).
  */
 
 export function invoiceStyles(fontDataUri) {
@@ -296,9 +301,9 @@ html, body {
 .inv-table tbody tr:last-child td { border-bottom: none; }
 
 .inv-table td.col-desc { text-align: right; overflow-wrap: break-word; }
-.inv-table td.col-qty, .inv-table td.col-unit { text-align: center; }
+.inv-table td.col-qty, .inv-table td.col-unit,
 .inv-table td.col-price, .inv-table td.col-discount,
-.inv-table td.col-total, .inv-table td.col-net { text-align: right; }
+.inv-table td.col-total, .inv-table td.col-net { text-align: center; }
 
 .col-row { width: var(--col-row); }
 .col-desc { width: var(--col-desc); }
@@ -358,6 +363,7 @@ html, body {
     "words  notes buyer seller";
   grid-template-rows: minmax(0, 1fr) auto;
   break-inside: avoid;
+  margin-top: 2mm;
 }
 
 .inv-totals { grid-area: totals; }
@@ -478,7 +484,7 @@ html, body {
 }
 
 .inv-footer {
-  margin-top: auto;
+  margin-top: 2.1mm;
   padding: 1.6mm 4.5mm;
   background: var(--band-fill);
   color: var(--band-ink);

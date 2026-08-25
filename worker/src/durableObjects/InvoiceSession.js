@@ -2,13 +2,15 @@ import { DurableObject } from "cloudflare:workers";
 import {
   sendMessage,
   editMessageReplyMarkup,
+  editMessageText,
+  deleteMessage,
   answerCallbackQuery,
   sendChatAction,
   sendDocument,
   inlineKeyboard,
   replyKeyboard,
 } from "../lib/telegram.js";
-import { COMPANIES, COMPANY_ORDER, getCompany } from "../lib/companies.js";
+import { COMPANIES, COMPANY_ORDER, getCompany, OTHER_COMPANY_KEY, buildCustomCompany } from "../lib/companies.js";
 import {
   parseQtyMilli,
   parseMoneyBig,
@@ -25,11 +27,42 @@ const MAIN_MENU = replyKeyboard([["➕ فاکتور جدید"]]);
 const MAX_HISTORY = 20;
 const MAX_ITEMS = 30;
 
+const WAIT_MESSAGE_TEXT = "⏳ در حال آماده‌سازی و ارسال پیش‌فاکتور، لطفاً منتظر بمانید…";
+
+// Sequential customer-detail fields asked after "تکمیل اطلاعات مشتری". Each
+// step can be skipped or short-circuited straight to item entry.
+const CUSTOMER_DETAIL_FIELDS = [
+  { step: "customer_detail_address", stateKey: "buyerAddress", prompt: "🏠 نشانی مشتری را وارد کنید:" },
+  { step: "customer_detail_postal", stateKey: "buyerPostalCode", prompt: "📮 کد پستی مشتری را وارد کنید:" },
+  { step: "customer_detail_national", stateKey: "buyerNationalId", prompt: "🆔 شناسه ملی مشتری را وارد کنید:" },
+  { step: "customer_detail_phone", stateKey: "buyerPhone", prompt: "☎️ تلفن مشتری را وارد کنید:" },
+];
+
+function isCustomerDetailStep(step) {
+  return CUSTOMER_DETAIL_FIELDS.some((f) => f.step === step);
+}
+
+function customerDetailField(step) {
+  return CUSTOMER_DETAIL_FIELDS.find((f) => f.step === step);
+}
+
+// Step to move to once a customer-detail field is filled/skipped: the next
+// field, or item entry after the last one.
+function afterCustomerDetailStep(step) {
+  const idx = CUSTOMER_DETAIL_FIELDS.findIndex((f) => f.step === step);
+  return CUSTOMER_DETAIL_FIELDS[idx + 1]?.step ?? "item_description";
+}
+
 function freshState() {
   return {
     step: "idle",
     companyKey: null,
+    customCompanyName: null,
     buyerName: null,
+    buyerAddress: null,
+    buyerPostalCode: null,
+    buyerNationalId: null,
+    buyerPhone: null,
     items: [],
     currentItem: {},
     includeStamp: null,
@@ -52,10 +85,23 @@ function backAndCancelKeyboard(extraRows = []) {
   ]);
 }
 
+function customerDetailKeyboard() {
+  return backAndCancelKeyboard([
+    [{ text: "⏭ رد کردن این مورد", callback_data: "custdetail:skip" }],
+    [{ text: "📦 ورود اقلام کالا", callback_data: "custdetail:items" }],
+  ]);
+}
+
 export class InvoiceSession extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.state = null;
+    // In-memory guard against double-triggering PDF generation from a
+    // rapid double-tap on the final "stamp" button. Deliberately not part
+    // of persisted state: it only needs to survive within one live
+    // instance, checked/set synchronously (no await in between) so two
+    // near-simultaneous callback deliveries can't both pass the check.
+    this.generating = false;
   }
 
   async loadState() {
@@ -138,9 +184,20 @@ export class InvoiceSession extends DurableObject {
       return;
     }
 
+    if (isCustomerDetailStep(state.step)) {
+      await this.onCustomerDetailField(chatId, token, state, text);
+      return;
+    }
+
     switch (state.step) {
+      case "custom_company_name":
+        await this.onCustomCompanyName(chatId, token, state, text);
+        return;
       case "customer_name":
         await this.onCustomerName(chatId, token, state, text);
+        return;
+      case "customer_action":
+        await this.promptCustomerAction(chatId, token);
         return;
       case "item_description":
         await this.onItemDescription(chatId, token, state, text);
@@ -171,11 +228,52 @@ export class InvoiceSession extends DurableObject {
     }
     const next = this.advance(state, (s) => {
       s.buyerName = text.slice(0, 200);
-      s.step = "item_description";
+      s.step = "customer_action";
       return s;
     });
     await this.saveState(next);
-    await this.promptItemDescription(chatId, token, next);
+    await this.promptCustomerAction(chatId, token);
+  }
+
+  async onCustomCompanyName(chatId, token, state, text) {
+    if (!text) {
+      await sendMessage(token, chatId, "❗️نام شرکت نمی‌تواند خالی باشد. دوباره وارد کنید:", {
+        reply_markup: backAndCancelKeyboard(),
+      });
+      return;
+    }
+    const name = text.slice(0, 200);
+    const next = this.advance(state, (s) => {
+      s.companyKey = OTHER_COMPANY_KEY;
+      s.customCompanyName = name;
+      s.step = "customer_name";
+      return s;
+    });
+    await this.saveState(next);
+    await sendMessage(token, chatId, `✅ نام شرکت ثبت شد: ${name}`);
+    await sendMessage(token, chatId, "👤 نام مشتری (خریدار) را وارد کنید:", {
+      reply_markup: backAndCancelKeyboard(),
+    });
+  }
+
+  async onCustomerDetailField(chatId, token, state, text) {
+    const field = customerDetailField(state.step);
+    if (!text) {
+      await sendMessage(
+        token,
+        chatId,
+        "❗️این مورد نمی‌تواند خالی باشد. مقدار را وارد کنید یا از دکمه‌های زیر استفاده کنید:",
+        { reply_markup: customerDetailKeyboard() }
+      );
+      return;
+    }
+    const next = this.advance(state, (s) => {
+      s[field.stateKey] = text.slice(0, 200);
+      s.step = afterCustomerDetailStep(field.step);
+      return s;
+    });
+    await this.saveState(next);
+    await this.promptCustomerDetailOrItems(chatId, token, next);
   }
 
   async onItemDescription(chatId, token, state, text) {
@@ -291,6 +389,18 @@ export class InvoiceSession extends DurableObject {
       return;
     }
 
+    if (data === "company:other" && state.step === "choose_company") {
+      state = this.advance(state, (s) => {
+        s.step = "custom_company_name";
+        return s;
+      });
+      await this.saveState(state);
+      await sendMessage(token, chatId, "🏢 نام شرکت را وارد کنید:", {
+        reply_markup: backAndCancelKeyboard(),
+      });
+      return;
+    }
+
     if (data.startsWith("company:") && state.step === "choose_company") {
       const key = data.slice("company:".length);
       if (!getCompany(key)) return;
@@ -304,6 +414,46 @@ export class InvoiceSession extends DurableObject {
       await sendMessage(token, chatId, "👤 نام مشتری (خریدار) را وارد کنید:", {
         reply_markup: backAndCancelKeyboard(),
       });
+      return;
+    }
+
+    if (data === "custentry:items" && state.step === "customer_action") {
+      state = this.advance(state, (s) => {
+        s.step = "item_description";
+        return s;
+      });
+      await this.saveState(state);
+      await this.promptItemDescription(chatId, token, state);
+      return;
+    }
+
+    if (data === "custentry:details" && state.step === "customer_action") {
+      state = this.advance(state, (s) => {
+        s.step = CUSTOMER_DETAIL_FIELDS[0].step;
+        return s;
+      });
+      await this.saveState(state);
+      await this.promptCustomerDetail(chatId, token, state.step);
+      return;
+    }
+
+    if (data === "custdetail:skip" && isCustomerDetailStep(state.step)) {
+      state = this.advance(state, (s) => {
+        s.step = afterCustomerDetailStep(s.step);
+        return s;
+      });
+      await this.saveState(state);
+      await this.promptCustomerDetailOrItems(chatId, token, state);
+      return;
+    }
+
+    if (data === "custdetail:items" && isCustomerDetailStep(state.step)) {
+      state = this.advance(state, (s) => {
+        s.step = "item_description";
+        return s;
+      });
+      await this.saveState(state);
+      await this.promptItemDescription(chatId, token, state);
       return;
     }
 
@@ -334,12 +484,21 @@ export class InvoiceSession extends DurableObject {
 
     if (data === "stamp:yes" || data === "stamp:no") {
       if (state.step !== "ask_stamp") return;
+      // Synchronous check-then-set with no await in between, so a second
+      // callback for a rapid double-tap can't slip through before the
+      // first one has flipped the flag.
+      if (this.generating) return;
+      this.generating = true;
       state = this.advance(state, (s) => {
         s.includeStamp = data === "stamp:yes";
         return s;
       });
       await this.saveState(state);
-      await this.generateAndSendInvoice(chatId, token, state);
+      try {
+        await this.generateAndSendInvoice(chatId, token, state);
+      } finally {
+        this.generating = false;
+      }
       return;
     }
   }
@@ -350,9 +509,34 @@ export class InvoiceSession extends DurableObject {
     await sendMessage(token, chatId, "🏢 شرکت صادرکننده را انتخاب کنید:", {
       reply_markup: inlineKeyboard([
         ...COMPANY_ORDER.map((key) => [{ text: COMPANIES[key].label, callback_data: `company:${key}` }]),
+        [{ text: "✏️ ورود نام شرکت", callback_data: "company:other" }],
         [{ text: "❌ لغو", callback_data: "cancel" }],
       ]),
     });
+  }
+
+  async promptCustomerAction(chatId, token) {
+    await sendMessage(token, chatId, "چه کاری انجام می‌دهید؟", {
+      reply_markup: backAndCancelKeyboard([
+        [{ text: "📦 ورود اقلام کالا", callback_data: "custentry:items" }],
+        [{ text: "📝 تکمیل اطلاعات مشتری", callback_data: "custentry:details" }],
+      ]),
+    });
+  }
+
+  async promptCustomerDetail(chatId, token, step) {
+    const field = customerDetailField(step);
+    await sendMessage(token, chatId, field.prompt, { reply_markup: customerDetailKeyboard() });
+  }
+
+  // After a customer-detail field is filled/skipped: either the next field,
+  // or (past the last one) straight into item entry.
+  async promptCustomerDetailOrItems(chatId, token, state) {
+    if (state.step === "item_description") {
+      await this.promptItemDescription(chatId, token, state);
+    } else {
+      await this.promptCustomerDetail(chatId, token, state.step);
+    }
   }
 
   async promptItemDescription(chatId, token, state) {
@@ -403,10 +587,24 @@ export class InvoiceSession extends DurableObject {
       case "choose_company":
         await this.promptChooseCompany(chatId, token);
         return;
+      case "custom_company_name":
+        await sendMessage(token, chatId, "🏢 نام شرکت را وارد کنید:", {
+          reply_markup: backAndCancelKeyboard(),
+        });
+        return;
       case "customer_name":
         await sendMessage(token, chatId, "👤 نام مشتری (خریدار) را وارد کنید:", {
           reply_markup: backAndCancelKeyboard(),
         });
+        return;
+      case "customer_action":
+        await this.promptCustomerAction(chatId, token);
+        return;
+      case "customer_detail_address":
+      case "customer_detail_postal":
+      case "customer_detail_national":
+      case "customer_detail_phone":
+        await this.promptCustomerDetail(chatId, token, state.step);
         return;
       case "item_description":
         await this.promptItemDescription(chatId, token, state);
@@ -433,12 +631,20 @@ export class InvoiceSession extends DurableObject {
   // ---------------- Final PDF generation ----------------
 
   async generateAndSendInvoice(chatId, token, state) {
+    // Sent before any of the slow work below so the user isn't left staring
+    // at a silent chat for several seconds wondering if the bot died.
+    const waitMessage = await sendMessage(token, chatId, WAIT_MESSAGE_TEXT).catch(() => null);
+    const waitMessageId = waitMessage?.message_id ?? null;
+
     await sendChatAction(token, chatId, "upload_document").catch(() => {});
     try {
-      const company = getCompany(state.companyKey);
+      const company =
+        state.companyKey === OTHER_COMPANY_KEY
+          ? buildCustomCompany(state.customCompanyName)
+          : getCompany(state.companyKey);
       const [logoDataUri, stampDataUri, fontDataUri] = await Promise.all([
-        loadDataUri(this.env, company.logo),
-        state.includeStamp ? loadDataUri(this.env, company.stamp) : Promise.resolve(null),
+        company.logo ? loadDataUri(this.env, company.logo) : Promise.resolve(null),
+        state.includeStamp && company.stamp ? loadDataUri(this.env, company.stamp) : Promise.resolve(null),
         loadDataUri(this.env, "/fonts/vazirmatn-arabic-variable.woff2"),
       ]);
 
@@ -470,6 +676,10 @@ export class InvoiceSession extends DurableObject {
         docDate,
         validity: "پایان روز جاری",
         buyerName: state.buyerName,
+        buyerAddress: state.buyerAddress,
+        buyerPostalCode: state.buyerPostalCode,
+        buyerNationalId: state.buyerNationalId,
+        buyerPhone: state.buyerPhone,
         items,
         includeStamp: !!state.includeStamp,
       });
@@ -479,6 +689,9 @@ export class InvoiceSession extends DurableObject {
 
       await sendDocument(token, chatId, pdfBytes, filename, "🎉 پیش‌فاکتور شما آماده است.");
       await this.saveState(freshState());
+      if (waitMessageId) {
+        await deleteMessage(token, chatId, waitMessageId).catch(() => {});
+      }
       await sendMessage(token, chatId, "برای صدور فاکتور جدید، «➕ فاکتور جدید» را بزنید.", {
         reply_markup: MAIN_MENU,
       });
@@ -489,11 +702,12 @@ export class InvoiceSession extends DurableObject {
         return s;
       });
       await this.saveState(retryState);
-      await sendMessage(
-        token,
-        chatId,
-        "⚠️ در تولید فایل PDF مشکلی پیش آمد. لطفاً دوباره تلاش کنید."
-      );
+      const errorText = "⚠️ در تولید فایل PDF مشکلی پیش آمد. لطفاً دوباره تلاش کنید.";
+      if (waitMessageId) {
+        await editMessageText(token, chatId, waitMessageId, errorText).catch(() => {});
+      } else {
+        await sendMessage(token, chatId, errorText);
+      }
       await this.promptStamp(chatId, token);
     }
   }
