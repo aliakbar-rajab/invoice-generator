@@ -518,6 +518,132 @@ test("editor and print clone keep the same gap below a grown landscape table", a
   expect(Math.abs(screenGap - printGap)).toBeLessThanOrEqual(1);
 });
 
+test("eleven detailed landscape items stay on one A4 page", async ({ page }, testInfo) => {
+  await openApp(page);
+  await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار آزمایشی");
+
+  const descriptions = [
+    "میلگرد آجدار A3 ذوب‌آهن اصفهان سایز ۱۶ شاخه ۱۲ متری",
+    "میلگرد آجدار A3 ذوب‌آهن اصفهان سایز ۱۸ شاخه ۱۲ متری",
+    "میلگرد آجدار A3 ذوب‌آهن اصفهان سایز ۲۰ شاخه ۱۲ متری",
+    "تیرآهن IPE ذوب‌آهن اصفهان سایز ۱۴ شاخه ۱۲ متری",
+    "تیرآهن IPE ذوب‌آهن اصفهان سایز ۱۶ شاخه ۱۲ متری",
+    "قوطی صنعتی ۴۰ در ۴۰ ضخامت ۲ میلی‌متر شاخه ۶ متری",
+    "نبشی بال مساوی ۴۰ در ۴۰ ضخامت ۴ میلی‌متر شاخه ۶ متری",
+    "ناودانی سبک سایز ۸ شاخه ۶ متری تولید کارخانه تهران",
+    "ورق سیاه فولاد مبارکه ضخامت ۲ میلی‌متر ابعاد ۱ در ۲ متر",
+    "ورق گالوانیزه ضخامت ۱ میلی‌متر ابعاد ۱ در ۲ متر",
+    "لوله صنعتی سایز ۲ اینچ ضخامت ۲ میلی‌متر شاخه ۶ متری",
+  ];
+
+  for (let index = 0; index < descriptions.length; index += 1) {
+    if (index >= 7) {
+      await page.getByRole("button", { name: "افزودن ردیف/قلم جدید", exact: true }).click();
+    }
+    const rowNumber = String(index + 1).replace(/[0-9]/g, (digit) =>
+      String.fromCharCode(digit.charCodeAt(0) + 1728)
+    );
+    await page.getByLabel(`ردیف ${rowNumber} — شرح کالا یا خدمت`, { exact: true }).fill(
+      descriptions[index] + " تحویل بنگاه تهران طبق مشخصات فنی مورد تأیید خریدار"
+    );
+    await page.getByLabel(`ردیف ${rowNumber} — تعداد یا مقدار`, { exact: true }).fill("1");
+    await page.getByLabel(`ردیف ${rowNumber} — مبلغ واحد`, { exact: true }).fill(String((index + 1) * 1_000_000));
+  }
+
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(1);
+
+  const pages = page.locator("#print-document .print-page");
+  await expect(pages).toHaveCount(1);
+  await expect(pages.first()).toHaveClass(/layout-condensed/);
+  const metrics = await pages.first().evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(metrics.scrollHeight).toBeLessThanOrEqual(metrics.clientHeight + 2);
+  const numericOverflow = await pages.first()
+    .locator("[data-row-computed], .inv-totals strong")
+    .evaluateAll((elements) => elements.map((element) => element.scrollWidth - element.clientWidth));
+  expect(numericOverflow.every((overflow) => overflow <= 1)).toBe(true);
+  await page.pdf({
+    path: testInfo.outputPath("eleven-items-one-page.pdf"),
+    preferCSSPageSize: true,
+    printBackground: true,
+  });
+});
+
+test("sixteen landscape items use one A4 page and item seventeen starts page two", async ({ page }, testInfo) => {
+  await openApp(page);
+  await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار آزمایشی");
+  await page.locator('[data-field="notes"]').fill(
+    "شماره حساب: ۹۴۶۹۰۴۳۰۷۷\nشماره شبا: ۶۲۰۱۲۰۰۰۰۰۰۰۹۴۶۹۰۴۳۰۷۷\nبه نام فروشنده\nبانک ملت"
+  );
+
+  async function fillItem(index) {
+    if (index >= 7) {
+      await page.getByRole("button", { name: "افزودن ردیف/قلم جدید", exact: true }).click();
+    }
+    const rowNumber = String(index + 1).replace(/[0-9]/g, (digit) =>
+      String.fromCharCode(digit.charCodeAt(0) + 1728)
+    );
+    await page.getByLabel(`ردیف ${rowNumber} — شرح کالا یا خدمت`, { exact: true })
+      .fill(`تهیه مصالح و اجرای سقف کاذب فلت طبقه ${index + 1}`);
+    await page.getByLabel(`ردیف ${rowNumber} — تعداد یا مقدار`, { exact: true }).fill(String(index + 20));
+    await page.getByLabel(`ردیف ${rowNumber} — مبلغ واحد`, { exact: true }).fill(String((index + 10) * 1_000_000));
+  }
+
+  for (let index = 0; index < 11; index += 1) await fillItem(index);
+
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(1);
+  let pages = page.locator("#print-document .print-page");
+  await expect(pages).toHaveCount(1);
+  await expect(pages.first().locator("tbody tr")).toHaveCount(11);
+  const firstMetrics = await pages.first().evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+    bottomGap: element.getBoundingClientRect().bottom -
+      element.querySelector(".inv-footer").getBoundingClientRect().bottom,
+    closingGap: element.querySelector(".inv-summary").getBoundingClientRect().top -
+      element.querySelector(".inv-table-frame").getBoundingClientRect().bottom,
+  }));
+  expect(firstMetrics.scrollHeight).toBeLessThanOrEqual(firstMetrics.clientHeight + 2);
+  expect(firstMetrics.bottomGap).toBeLessThanOrEqual(30);
+  expect(firstMetrics.closingGap).toBeGreaterThanOrEqual(2);
+
+  await page.pdf({
+    path: testInfo.outputPath("eleven-items-adaptive-page.pdf"),
+    preferCSSPageSize: true,
+    printBackground: true,
+  });
+
+  await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+  for (let index = 11; index < 16; index += 1) await fillItem(index);
+
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(2);
+  pages = page.locator("#print-document .print-page");
+  await expect(pages).toHaveCount(1);
+  await expect(pages.first().locator("tbody tr")).toHaveCount(16);
+
+  await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+  await fillItem(16);
+
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(3);
+  pages = page.locator("#print-document .print-page");
+  await expect(pages).toHaveCount(2);
+  const rowCounts = await pages.locator("tbody").evaluateAll((bodies) =>
+    bodies.map((body) => body.querySelectorAll("tr").length)
+  );
+  expect(rowCounts).toEqual([16, 1]);
+  const pageMetrics = await pages.evaluateAll((elements) => elements.map((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  })));
+  expect(pageMetrics.every((metric) => metric.scrollHeight <= metric.clientHeight + 2)).toBe(true);
+});
+
 test("a normal multi-page plan fits every generated A4 page and renders to PDF", async ({ page }, testInfo) => {
   await openApp(page);
   await page.getByLabel("درصد مالیات و عوارض", { exact: true }).fill("10");

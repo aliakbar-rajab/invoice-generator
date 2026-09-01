@@ -1510,6 +1510,52 @@ body,
 .print-page.layout-compact .inv-totals .inv-total-final { min-height: 9mm; }
 .print-page.layout-compact .inv-footer { padding-block: 1mm; margin-top: 1.4mm; }
 
+/* Dense trade invoices often carry one extra specification phrase per row.
+   When the ordinary compact pass still spills onto a second sheet, this
+   bounded 9-16-row mode spends less paper on chrome and gives that copy more
+   width. Type remains at a legible 8pt and all fit checks still measure the
+   finished A4 clone before the browser print dialog opens. */
+.print-page.layout-condensed.orientation-landscape {
+  padding-block: 5mm;
+  font-size: 8.4pt;
+  --col-row: 3.5%;
+  --col-desc: 42%;
+  --col-qty: 5%;
+  --col-unit: 4.5%;
+  --col-price: 10.5%;
+  --col-total: 10.5%;
+  --col-discount: 9%;
+  --col-net: 12%;
+  --sig-h: 35mm;
+  --sig-w: 40mm;
+}
+.print-page.layout-condensed .inv-head { padding-block: 0.9mm; }
+.print-page.layout-condensed.orientation-landscape .inv-logo { width: 11mm; height: 11mm; }
+.print-page.layout-condensed .inv-parties { margin-block: 0.8mm; gap: 3mm; }
+.print-page.layout-condensed .inv-card-head { padding-block: 0.55mm; font-size: 8pt; }
+.print-page.layout-condensed .inv-card-grid { padding-block: 0.45mm 0.6mm; gap-block: 0.15mm; }
+.print-page.layout-condensed .inv-field-label { padding-top: 0.1mm; font-size: 7.2pt; }
+.print-page.layout-condensed .inv-field-value { font-size: 8.2pt; line-height: 1.22; }
+.print-page.layout-condensed .inv-table { font-size: 8pt; }
+.print-page.layout-condensed .inv-table th { padding-block: 0.5mm; font-size: 7.4pt; line-height: 1.18; }
+.print-page.layout-condensed .inv-table td { padding: 0.24mm 1mm; line-height: 1.2; }
+.print-page.layout-condensed .inv-summary { margin-top: 1mm; column-gap: 2.5mm; row-gap: 0.8mm; }
+.print-page.layout-condensed .inv-amount-words { min-height: 6mm; padding-block: 0.3mm; }
+.print-page.layout-condensed .inv-totals > div { min-height: 3.4mm; padding-block: 0.25mm; }
+.print-page.layout-condensed .inv-totals .inv-total-final { min-height: 8.2mm; padding-block: 0.8mm; }
+.print-page.layout-condensed .inv-footer { padding-block: 0.7mm; margin-top: 0.8mm; }
+
+/* A single-page invoice uses its real row count only. Row height adapts within
+   a restrained range, while the commercial closing block settles against the
+   bottom edge. The remaining space becomes intentional separation—not empty
+   paper below the document and never fabricated item rows. */
+.print-page.layout-single-page .inv-table tbody tr {
+  height: var(--print-row-height, auto);
+}
+.print-page.layout-single-page .inv-summary {
+  margin-top: auto;
+}
+
 /* Proper continuation pages are created immediately before print. */
 .print-document { display: none; }
 .print-continuation-head {

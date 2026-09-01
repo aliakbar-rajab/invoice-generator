@@ -56,6 +56,7 @@
   // These values may be saved with the invoice, but never mutate a profile.
   var invoiceAssetOverrides = { logo: null, stamp: null };
   var DEFAULT_INVOICE_ROWS_BY_ORIENTATION = { landscape: 7, portrait: 14 };
+  var MAX_PRINT_ITEM_ROWS_PER_PAGE = 16;
   // Only a fresh, untouched document follows the orientation defaults. Once
   // the user edits the item rows, their exact count becomes authoritative.
   var defaultRowCountManaged = false;
@@ -2891,6 +2892,13 @@
     clone.querySelectorAll("[id]").forEach(function (el) { el.removeAttribute("id"); });
     clone.classList.add("print-page");
     clone.classList.toggle("layout-compact", !!options.compact);
+    clone.classList.toggle("layout-condensed", !!options.condensed);
+    var usesSinglePageLayout = (options.totalPages || 1) === 1 && !!options.finalPage;
+    clone.classList.toggle("layout-single-page", usesSinglePageLayout);
+    if (usesSinglePageLayout && rowSources.length) {
+      var adaptiveRowHeight = Math.max(4.4, Math.min(6.4, 70 / rowSources.length));
+      clone.style.setProperty("--print-row-height", adaptiveRowHeight.toFixed(2) + "mm");
+    }
     clone.classList.remove("orientation-landscape", "orientation-portrait");
     clone.classList.add("orientation-" + options.orientation);
 
@@ -2969,10 +2977,11 @@
     return fits;
   }
 
-  function singlePageFits(rows, orientation, compact) {
+  function singlePageFits(rows, orientation, compact, condensed) {
     return pageFits(clonePrintPage(rows, {
       orientation: orientation,
       compact: compact,
+      condensed: condensed,
       finalPage: true,
       pageNo: 1,
       totalPages: 1,
@@ -2981,7 +2990,8 @@
 
   function maxFittingPrefix(rows, options) {
     var count = 0;
-    for (var i = 1; i <= rows.length; i += 1) {
+    var limit = Math.min(rows.length, options.maxRows || rows.length);
+    for (var i = 1; i <= limit; i += 1) {
       var candidate = clonePrintPage(rows.slice(0, i), options);
       if (!pageFits(candidate)) break;
       count = i;
@@ -2991,7 +3001,8 @@
 
   function maxFittingSuffix(rows, options) {
     var count = 0;
-    for (var i = 1; i <= rows.length; i += 1) {
+    var limit = Math.min(rows.length, options.maxRows || rows.length);
+    for (var i = 1; i <= limit; i += 1) {
       var candidate = clonePrintPage(rows.slice(rows.length - i), options);
       if (!pageFits(candidate)) break;
       count = i;
@@ -3020,11 +3031,24 @@
   }
 
   function buildPrintPlan(rows, orientation) {
-    if (singlePageFits(rows, orientation, false)) {
+    var withinSinglePageRowLimit = rows.length <= MAX_PRINT_ITEM_ROWS_PER_PAGE;
+    if (withinSinglePageRowLimit && singlePageFits(rows, orientation, false)) {
       return { compact: false, chunks: [rows], orientation: orientation };
     }
-    if (singlePageFits(rows, orientation, true)) {
+    if (withinSinglePageRowLimit && singlePageFits(rows, orientation, true)) {
       return { compact: true, chunks: [rows], orientation: orientation };
+    }
+    if (
+      orientation === "landscape" &&
+      withinSinglePageRowLimit &&
+      singlePageFits(rows, orientation, true, true)
+    ) {
+      return {
+        compact: true,
+        condensed: true,
+        chunks: [rows],
+        orientation: orientation,
+      };
     }
 
     var compact = true;
@@ -3035,6 +3059,7 @@
       finalPage: true,
       pageNo: 2,
       totalPages: 2,
+      maxRows: MAX_PRINT_ITEM_ROWS_PER_PAGE,
     });
     // Not even a single item row fits alongside the closing block (notes +
     // amount-in-words + totals + signatures + footer), so nothing here is
@@ -3048,10 +3073,9 @@
         overflowKind: "final-page",
       };
     }
-    // Do not crowd the final page while leaving the first half empty. If two
-    // balanced halves both fit their respective page structures, prefer that
-    // distribution; for very large documents the normal greedy loop below
-    // still creates as many continuation pages as required.
+    // Fill complete 16-row sheets before moving the remainder to the final
+    // page. For 17 items this deliberately means 16 + 1, matching the printed
+    // form's capacity instead of balancing the document as 9 + 8.
     var firstCapacity = maxFittingPrefix(rows, {
       orientation: orientation,
       compact: compact,
@@ -3059,9 +3083,10 @@
       finalPage: false,
       pageNo: 1,
       totalPages: 2,
+      maxRows: MAX_PRINT_ITEM_ROWS_PER_PAGE,
     });
-    var balancedFinal = Math.min(finalCount, Math.ceil(rows.length / 2));
-    if (rows.length - balancedFinal <= firstCapacity) finalCount = balancedFinal;
+    var preferredFinalCount = ((rows.length - 1) % MAX_PRINT_ITEM_ROWS_PER_PAGE) + 1;
+    if (preferredFinalCount <= finalCount) finalCount = preferredFinalCount;
     finalCount = Math.min(finalCount, Math.max(1, rows.length - 1));
     var remaining = rows.slice(0, rows.length - finalCount);
     var finalRows = rows.slice(rows.length - finalCount);
@@ -3078,6 +3103,7 @@
         startIndex: startIndex,
         pageNo: chunks.length + 1,
         totalPages: 2,
+        maxRows: MAX_PRINT_ITEM_ROWS_PER_PAGE,
       });
       if (capacity === 0) {
         return {
@@ -3109,6 +3135,7 @@
       var page = clonePrintPage(chunk, {
         orientation: plan.orientation,
         compact: plan.compact,
+        condensed: plan.condensed,
         continuation: index > 0,
         finalPage: index === totalPages - 1,
         startIndex: startIndex,
@@ -3129,6 +3156,7 @@
       var page = clonePrintPage(chunk, {
         orientation: plan.orientation,
         compact: plan.compact,
+        condensed: plan.condensed,
         continuation: index > 0,
         finalPage: index === totalPages - 1,
         startIndex: startIndex,
