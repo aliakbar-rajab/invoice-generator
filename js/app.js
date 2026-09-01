@@ -12,7 +12,7 @@
 (function () {
   "use strict";
 
-  var ROW_FIELDS = ["description", "quantity", "unit", "unitPrice", "discount"];
+  var ROW_FIELDS = ["description", "quantity", "unit", "unitPrice"];
 
   // CSS px per millimetre at the 96dpi CSS reference resolution. Used by the
   // screen-preview scaler and print-page measurements.
@@ -76,7 +76,6 @@
     quantity: "تعداد یا مقدار",
     unit: "واحد",
     unitPrice: "مبلغ واحد",
-    discount: "تخفیف",
   };
 
   // ---------- Company profiles ----------
@@ -1394,7 +1393,7 @@
   function makeBlankRows(n) {
     var rows = [];
     for (var i = 0; i < n; i += 1) {
-      rows.push({ description: "", quantity: "", unit: "", unitPrice: "", discount: "" });
+      rows.push({ description: "", quantity: "", unit: "", unitPrice: "" });
     }
     return rows;
   }
@@ -1488,6 +1487,7 @@
     document.getElementById("orientation-portrait").checked = normalized === "portrait";
     pageStyleEl.textContent = "@page { size: A4 " + normalized + "; margin: 0; }";
     fitSheetScale();
+    scheduleSheetRhythm();
   }
 
   // ---------- Screen preview scaling ----------
@@ -1538,10 +1538,20 @@
   var FIT_MIN_SCALE = 0.82;
   var FIT_STEP = 0.03;
 
+  // The floor is the element's own CSS min-height, not a magic pixel count.
+  // The 18px that used to be hardcoded here was ~4px more than a single line
+  // of an item cell, which pinned every row of the editor's table taller than
+  // the same row in its print clone and put a hard floor under the vertical
+  // rhythm at high item counts. .cell-textarea and .inv-autogrow both declare
+  // a real one-line min-height in invoice.css; that is the right place for it.
   function autoGrowTextarea(el) {
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = Math.max(el.scrollHeight, 18) + "px";
+    // scrollHeight is the content box; box-sizing is border-box sheet-wide,
+    // so any border has to be added back or the content is squeezed by it.
+    var styles = window.getComputedStyle(el);
+    var borders = (parseFloat(styles.borderTopWidth) || 0) + (parseFloat(styles.borderBottomWidth) || 0);
+    el.style.height = (el.scrollHeight + borders) + "px";
   }
 
   function autoGrowTextareas() {
@@ -1636,8 +1646,8 @@
       var qty = strictQuantity(el.value);
       if (qty.valid) el.value = formatQtyMilli(qty.value);
     } else {
-      var amount = strictMoney(el.value, field === "discount");
-      if (amount.valid) el.value = amount.value === 0n && field === "discount" ? "" : formatBigRial(amount.value);
+      var amount = strictMoney(el.value);
+      if (amount.valid) el.value = formatBigRial(amount.value);
     }
     fitNumericEl(el);
   }
@@ -1675,7 +1685,7 @@
         this.select();
       });
       input.addEventListener("keydown", handleCellKeydown);
-      if (field === "quantity" || field === "unitPrice" || field === "discount") {
+      if (field === "quantity" || field === "unitPrice") {
         input.addEventListener("blur", function () {
           reformatNumericCell(this, field);
           recalcAll({ skipStaticFit: true });
@@ -1767,8 +1777,8 @@
   // output ("۱٬۰۰۰٬۰۰۰", "۱٬۲۳۴٫۵۶۷") still round-trips unchanged.
   //
   // "" means genuinely empty; null means malformed. Callers must keep those
-  // apart: an empty discount or tax rate legitimately means zero, while a
-  // malformed one must never be quietly treated as one.
+  // apart: an empty tax rate legitimately means zero, while a malformed one
+  // must never be quietly treated as one.
   function normalizeStrictNumber(value) {
     var raw = toAsciiDigits(String(value == null ? "" : value)).trim().replace(/٫/g, ".");
     if (!raw) return "";
@@ -1787,10 +1797,9 @@
     return sign + intPart.replace(/[,٬\s]/g, "") + (fracPart === null ? "" : "." + fracPart);
   }
 
-  function strictMoney(value, emptyAsZero) {
+  function strictMoney(value) {
     var normalized = normalizeStrictNumber(value);
     if (normalized === null) return { valid: false, value: 0n };
-    if (!normalized && emptyAsZero) return { valid: true, value: 0n };
     if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, value: 0n };
     return {
       valid: /^\d+$/.test(normalized),
@@ -1837,8 +1846,6 @@
     var rows = rowsBody.querySelectorAll("tr");
     var filledRows = 0;
     var gross = 0n;
-    var discountSum = 0n;
-    var afterDiscountSum = 0n;
     calculationErrors = [];
     financialBlockingErrors = [];
 
@@ -1851,16 +1858,13 @@
       var descriptionInput = tr.querySelector('[data-row-field="description"]');
       var qtyInput = tr.querySelector('[data-row-field="quantity"]');
       var priceInput = tr.querySelector('[data-row-field="unitPrice"]');
-      var discountInput = tr.querySelector('[data-row-field="discount"]');
-      [descriptionInput, qtyInput, priceInput, discountInput].forEach(clearInlineError);
+      [descriptionInput, qtyInput, priceInput].forEach(clearInlineError);
 
       var totalEl = tr.querySelector('[data-row-computed="total"]');
-      var afterDiscountEl = tr.querySelector('[data-row-computed="afterDiscount"]');
 
       if (blank) {
         tr.querySelector(".row-index-badge").textContent = toPersianDigits(rowNumber);
         totalEl.textContent = "";
-        afterDiscountEl.textContent = "";
         return;
       }
 
@@ -1881,27 +1885,15 @@
         setInlineError(qtyInput);
       }
 
-      var price = strictMoney(priceInput.value, false);
+      var price = strictMoney(priceInput.value);
       if (!price.valid) {
         rowErrors.push("مبلغ واحد معتبر نیست");
         rowFinancialErrors.push("مبلغ واحد معتبر نیست");
         setInlineError(priceInput);
       }
 
-      var discount = strictMoney(discountInput.value, true);
-      if (!discount.valid) {
-        rowErrors.push("تخفیف معتبر نیست");
-        rowFinancialErrors.push("تخفیف معتبر نیست");
-        setInlineError(discountInput);
-      }
-
       var total = 0n;
       if (qty.valid && price.valid) total = bigRoundDiv(qty.value * price.value, 1000n);
-      if (discount.valid && qty.valid && price.valid && discount.value > total) {
-        rowErrors.push("تخفیف از مبلغ کل ردیف بیشتر است");
-        rowFinancialErrors.push("تخفیف از مبلغ کل ردیف بیشتر است");
-        setInlineError(discountInput);
-      }
 
       rowErrors.forEach(function (message) {
         calculationErrors.push("ردیف " + toPersianDigits(rowNumber) + ": " + message);
@@ -1910,28 +1902,19 @@
         financialBlockingErrors.push("ردیف " + toPersianDigits(rowNumber) + ": " + message);
       });
 
-      // A missing description is unrelated to the arithmetic. Invalid numeric
-      // values are never allowed to alter an authoritative total: an invalid
-      // quantity/price excludes this row, while an invalid or excessive
-      // discount is neutralized to zero. Healthy rows continue to calculate.
+      // A missing description is unrelated to the arithmetic. An invalid
+      // quantity or price is never allowed to alter an authoritative total —
+      // it excludes this row, while healthy rows continue to calculate.
       if (qty.valid && price.valid) {
-        var usableDiscount = discount.valid && discount.value <= total ? discount.value : 0n;
-        var afterDiscount = total - usableDiscount;
         totalEl.textContent = formatBigRial(total);
-        afterDiscountEl.textContent = formatBigRial(afterDiscount);
         gross += total;
-        discountSum += usableDiscount;
-        afterDiscountSum += afterDiscount;
       } else {
         totalEl.textContent = "";
-        afterDiscountEl.textContent = "";
       }
 
       fitNumericEl(totalEl);
-      fitNumericEl(afterDiscountEl);
       fitNumericEl(qtyInput);
       fitNumericEl(priceInput);
-      fitNumericEl(discountInput);
     });
 
     var taxPercentInput = document.querySelector('[data-field="taxPercent"]');
@@ -1955,14 +1938,12 @@
     }
 
     var usableTax = tax.valid ? tax.value : 0n;
-    var taxTotal = bigRoundDiv(afterDiscountSum * usableTax, 10000n);
-    var netTotal = afterDiscountSum + taxTotal;
+    var taxTotal = bigRoundDiv(gross * usableTax, 10000n);
+    var netTotal = gross + taxTotal;
     var money = function (value) {
       return filledRows ? formatBigRial(value) + " ریال" : "";
     };
     setTotal("grossTotal", money(gross));
-    setTotal("discountTotal", money(discountSum));
-    setTotal("afterDiscountTotal", money(afterDiscountSum));
     setTotal("taxTotal", money(taxTotal));
     setTotal("netTotal", money(netTotal));
     setTotal("netTotalWords", filledRows ? rialToWordsBig(netTotal) : "");
@@ -1974,6 +1955,9 @@
     if (opts && opts.skipStaticFit) refreshEmptyStates();
     else fitStaticFields();
     updateDocumentIdentity();
+    // Row count, wrapped descriptions and grown textareas all move the
+    // sheet's content height, so the editor's rhythm is re-solved from here.
+    scheduleSheetRhythm();
     if (statusDotEl) statusDotEl.classList.toggle("has-error", calculationErrors.length > 0);
   }
 
@@ -2891,16 +2875,13 @@
     clone.removeAttribute("id");
     clone.querySelectorAll("[id]").forEach(function (el) { el.removeAttribute("id"); });
     clone.classList.add("print-page");
-    clone.classList.toggle("layout-compact", !!options.compact);
-    clone.classList.toggle("layout-condensed", !!options.condensed);
-    var usesSinglePageLayout = (options.totalPages || 1) === 1 && !!options.finalPage;
-    clone.classList.toggle("layout-single-page", usesSinglePageLayout);
-    if (usesSinglePageLayout && rowSources.length) {
-      var adaptiveRowHeight = Math.max(4.4, Math.min(6.4, 70 / rowSources.length));
-      clone.style.setProperty("--print-row-height", adaptiveRowHeight.toFixed(2) + "mm");
-    }
     clone.classList.remove("orientation-landscape", "orientation-portrait");
     clone.classList.add("orientation-" + options.orientation);
+    // Capacity probes (see maxFittingPrefix) ask for the tightest rhythm on
+    // purpose: how many rows a sheet can carry is a question about its floor,
+    // not about the setting it will eventually be printed at. Pages that are
+    // actually printed get their own solved rhythm in realizePrintPlan.
+    if (options.density != null) applySheetRhythm(clone, options.density, NO_EXTRA, 1);
 
     // Diagnostic-only (see diagnoseFinalPageOverflow): re-measure the very
     // same page with the notes block emptied, so a closing-block overflow can
@@ -2966,26 +2947,204 @@
     return clone;
   }
 
-  function pageFits(page) {
+  // ---------- Vertical rhythm solver ----------
+
+  /*
+   * Every vertical dimension on a sheet is a straight line in one scalar,
+   * --print-density (see the knob table at the top of invoice.css). The
+   * sheet's natural height is therefore monotonically increasing in that
+   * scalar, which is what makes an exact fit findable by bisection instead of
+   * by a hand-tuned cascade of "compact" / "condensed" tiers.
+   *
+   * Ten steps resolve the range to about one part in a thousand — under
+   * 0.05mm on the largest knob, i.e. finer than any printer can render.
+   */
+  var DENSITY_BISECTION_STEPS = 10;
+
+  // Second axis, and deliberately a narrow one: shrinking the document's type
+  // is how a sheet that still overflows at the tightest rhythm avoids
+  // spilling a couple of rows onto a second page. Below this the sheet stops
+  // looking like the same document, so a page break is the better answer.
+  var TYPE_SCALE_MIN = 0.9;
+  var TYPE_BISECTION_STEPS = 6;
+
+  // Under roughly eight items even the most generous rhythm cannot fill an A4
+  // page. The leftover height is spent rather than left as one dead band
+  // above the totals: first on the item rows, then on the closing block —
+  // each only this far, so a two-item invoice gets airy rows and a tall stamp
+  // box, not a table of banners under a signature field the size of a poster.
+  var ROW_EXTRA_MAX_MM = 5;
+  var BLOCK_EXTRA_MAX_MM = 14;
+
+  // Sub-pixel layout rounding routinely leaves a fitted page a fraction of a
+  // pixel over its own box; the tolerance the capacity probes have always
+  // used.
+  var FIT_TOLERANCE_PX = 2;
+
+  // The solver aims a hair UNDER the page instead of at the tolerance, so the
+  // setting it lands on has real headroom. Solving to `target + tolerance`
+  // means every fitted page sits exactly on the clipping boundary — content
+  // that measures as fitting and then prints with its last hairline shaved.
+  var FIT_HEADROOM_PX = 1;
+
+  function applySheetRhythm(el, density, extra, typeScale) {
+    el.style.setProperty("--print-density", density.toFixed(4));
+    el.style.setProperty("--print-row-extra", (extra.row || 0).toFixed(3) + "mm");
+    el.style.setProperty("--print-block-extra", (extra.block || 0).toFixed(3) + "mm");
+    el.style.setProperty("--doc-font-scale", typeScale.toFixed(4));
+  }
+
+  var NO_EXTRA = { row: 0, block: 0 };
+
+  function pageHeightPx(orientation) {
+    return (orientation === "portrait" ? 297 : 210) * MM_TO_PX;
+  }
+
+  /*
+   * Finds the most generous rhythm at which the element's content still fits
+   * inside targetPx, applies it, and reports it. Returns null when the
+   * content does not fit even at the tightest rhythm and the smallest type —
+   * the caller's cue to split the document across pages.
+   *
+   * The element must already be in the document; every measurement below is a
+   * synchronous layout read, so nothing here is ever painted.
+   */
+  function fitSheetToPage(el, rowCount, targetPx, options) {
+    // Item rows only take a share of the residual on a document that is a
+    // single sheet. Across a multi-page document the rows are a continuous
+    // run, and stretching the four survivors on the last page to twice the
+    // height of the sixteen on the first reads as two different tables.
+    var stretchRows = !options || options.stretchRows !== false;
+    var limit = targetPx - FIT_HEADROOM_PX;
+    el.classList.add("is-measuring-natural");
+    try {
+      var measure = function (density, typeScale) {
+        applySheetRhythm(el, density, NO_EXTRA, typeScale);
+        return el.getBoundingClientRect().height;
+      };
+
+      var typeScale = 1;
+      if (measure(0, 1) > limit) {
+        if (measure(0, TYPE_SCALE_MIN) > limit) return null;
+        var typeLo = TYPE_SCALE_MIN;
+        var typeHi = 1;
+        for (var t = 0; t < TYPE_BISECTION_STEPS; t += 1) {
+          var typeMid = (typeLo + typeHi) / 2;
+          if (measure(0, typeMid) <= limit) typeLo = typeMid;
+          else typeHi = typeMid;
+        }
+        typeScale = typeLo;
+      }
+
+      var density = 1;
+      if (measure(1, typeScale) > limit) {
+        var densityLo = 0;
+        var densityHi = 1;
+        for (var d = 0; d < DENSITY_BISECTION_STEPS; d += 1) {
+          var densityMid = (densityLo + densityHi) / 2;
+          if (measure(densityMid, typeScale) <= limit) densityLo = densityMid;
+          else densityHi = densityMid;
+        }
+        density = densityLo;
+      }
+
+      // Density alone bottoms out at 1; a document short enough to leave the
+      // page unfilled there spends what is left, in order, on the item rows
+      // and then on the closing block.
+      var extra = NO_EXTRA;
+      if (density === 1) {
+        var slackMm = (limit - measure(1, typeScale)) / MM_TO_PX;
+        var row = stretchRows && rowCount > 0
+          ? Math.max(0, Math.min(ROW_EXTRA_MAX_MM, slackMm / rowCount))
+          : 0;
+        var block = Math.max(0, Math.min(BLOCK_EXTRA_MAX_MM, slackMm - row * rowCount));
+        extra = { row: row, block: block };
+        applySheetRhythm(el, density, extra, typeScale);
+        // Both shares are derived from a measured slack, so this only ever
+        // trips on layout rounding — but a residual that overflowed the page
+        // it was meant to fill would be worse than no residual at all.
+        if (el.getBoundingClientRect().height > limit) extra = NO_EXTRA;
+      }
+
+      applySheetRhythm(el, density, extra, typeScale);
+      return { density: density, extra: extra, typeScale: typeScale };
+    } finally {
+      el.classList.remove("is-measuring-natural");
+    }
+  }
+
+  /*
+   * The editor is a preview of the printed page, so it is solved by exactly
+   * the same routine — on the live sheet itself rather than on a clone, so
+   * what is measured is the geometry the user is actually looking at.
+   *
+   * A document that cannot be made to fit one page is pinned at the tightest
+   * rhythm: the sheet then visibly runs past the A4 outline, which is an
+   * honest preview of the page break that print will produce.
+   */
+  function refreshSheetRhythm() {
+    var orientation = currentOrientation();
+    var rowCount = rowsBody.querySelectorAll("tr").length;
+    if (!fitSheetToPage(sheet, rowCount, pageHeightPx(orientation))) {
+      applySheetRhythm(sheet, 0, NO_EXTRA, TYPE_SCALE_MIN);
+    }
+  }
+
+  // Coalesces the solve behind a short timer: recalcAll runs on every
+  // keystroke, and re-solving the sheet a dozen times per character would be
+  // both wasted work and visible jitter in the row heights while typing.
+  var sheetRhythmTimer = null;
+  function scheduleSheetRhythm() {
+    if (sheetRhythmTimer !== null) window.clearTimeout(sheetRhythmTimer);
+    sheetRhythmTimer = window.setTimeout(function () {
+      sheetRhythmTimer = null;
+      refreshSheetRhythm();
+    }, 120);
+  }
+
+  // ---------- Page fitting ----------
+
+  // Mounts a page off-screen for the duration of one measurement pass. Any
+  // inline rhythm the pass leaves on the page survives; the mount does not.
+  function withMountedPage(page, run) {
     printDocumentEl.innerHTML = "";
     printDocumentEl.classList.add("is-measuring");
     printDocumentEl.appendChild(page);
-    void page.offsetHeight;
-    var fits = page.scrollHeight <= page.clientHeight + 2;
-    printDocumentEl.innerHTML = "";
-    printDocumentEl.classList.remove("is-measuring");
-    return fits;
+    try {
+      return run();
+    } finally {
+      printDocumentEl.innerHTML = "";
+      printDocumentEl.classList.remove("is-measuring");
+    }
   }
 
-  function singlePageFits(rows, orientation, compact, condensed) {
-    return pageFits(clonePrintPage(rows, {
+  function pageFits(page) {
+    return withMountedPage(page, function () {
+      void page.offsetHeight;
+      return page.scrollHeight <= page.clientHeight + FIT_TOLERANCE_PX;
+    });
+  }
+
+  // Solves one page's rhythm against its own A4 box. The target height is
+  // read while the page is still in its fixed-height state, before
+  // fitSheetToPage switches it to natural measurement.
+  function fitMountedPage(page, rowCount, options) {
+    return withMountedPage(page, function () {
+      return fitSheetToPage(page, rowCount, page.getBoundingClientRect().height, options);
+    });
+  }
+
+  // Can these rows be made to share one sheet with the closing block? Answered
+  // by the solver rather than by a fixed layout, so it accounts for the type
+  // shrink of last resort too.
+  function solveSinglePage(rows, orientation) {
+    var page = clonePrintPage(rows, {
       orientation: orientation,
-      compact: compact,
-      condensed: condensed,
       finalPage: true,
       pageNo: 1,
       totalPages: 1,
-    }));
+    });
+    return fitMountedPage(page, rows.length);
   }
 
   function maxFittingPrefix(rows, options) {
@@ -3015,12 +3174,12 @@
   // once the notes textarea is emptied, the notes text is the one thing the
   // user can actually shorten and the warning says so; otherwise the block is
   // simply taller than the chosen paper orientation allows.
-  function diagnoseFinalPageOverflow(rows, orientation, compact) {
+  function diagnoseFinalPageOverflow(rows, orientation) {
     var notesEl = document.querySelector('[data-field="notes"]');
     if (!notesEl || !notesEl.value.trim()) return "closing-block";
     var withoutNotes = clonePrintPage(rows.length ? [rows[rows.length - 1]] : [], {
       orientation: orientation,
-      compact: compact,
+      density: 0,
       continuation: true,
       finalPage: true,
       pageNo: 2,
@@ -3031,30 +3190,17 @@
   }
 
   function buildPrintPlan(rows, orientation) {
-    var withinSinglePageRowLimit = rows.length <= MAX_PRINT_ITEM_ROWS_PER_PAGE;
-    if (withinSinglePageRowLimit && singlePageFits(rows, orientation, false)) {
-      return { compact: false, chunks: [rows], orientation: orientation };
-    }
-    if (withinSinglePageRowLimit && singlePageFits(rows, orientation, true)) {
-      return { compact: true, chunks: [rows], orientation: orientation };
-    }
-    if (
-      orientation === "landscape" &&
-      withinSinglePageRowLimit &&
-      singlePageFits(rows, orientation, true, true)
-    ) {
-      return {
-        compact: true,
-        condensed: true,
-        chunks: [rows],
-        orientation: orientation,
-      };
+    if (rows.length <= MAX_PRINT_ITEM_ROWS_PER_PAGE && solveSinglePage(rows, orientation)) {
+      return { chunks: [rows], orientation: orientation };
     }
 
-    var compact = true;
+    // Capacity probing runs at the tightest rhythm (density 0): where a page
+    // breaks is a question about how much a sheet can carry at its floor, and
+    // each of the resulting pages is then solved for its own balanced setting
+    // by realizePrintPlan.
     var finalCount = maxFittingSuffix(rows, {
       orientation: orientation,
-      compact: compact,
+      density: 0,
       continuation: true,
       finalPage: true,
       pageNo: 2,
@@ -3067,7 +3213,6 @@
     // since the last row's index would be an arbitrary scapegoat.
     if (rows.length && finalCount === 0) {
       return {
-        compact: compact,
         chunks: [],
         orientation: orientation,
         overflowKind: "final-page",
@@ -3076,15 +3221,6 @@
     // Fill complete 16-row sheets before moving the remainder to the final
     // page. For 17 items this deliberately means 16 + 1, matching the printed
     // form's capacity instead of balancing the document as 9 + 8.
-    var firstCapacity = maxFittingPrefix(rows, {
-      orientation: orientation,
-      compact: compact,
-      continuation: false,
-      finalPage: false,
-      pageNo: 1,
-      totalPages: 2,
-      maxRows: MAX_PRINT_ITEM_ROWS_PER_PAGE,
-    });
     var preferredFinalCount = ((rows.length - 1) % MAX_PRINT_ITEM_ROWS_PER_PAGE) + 1;
     if (preferredFinalCount <= finalCount) finalCount = preferredFinalCount;
     finalCount = Math.min(finalCount, Math.max(1, rows.length - 1));
@@ -3097,7 +3233,7 @@
     while (remaining.length) {
       var capacity = maxFittingPrefix(remaining, {
         orientation: orientation,
-        compact: compact,
+        density: 0,
         continuation: !first,
         finalPage: false,
         startIndex: startIndex,
@@ -3107,7 +3243,6 @@
       });
       if (capacity === 0) {
         return {
-          compact: compact,
           chunks: [],
           orientation: orientation,
           overflowRowIndex: startIndex,
@@ -3121,21 +3256,24 @@
       first = false;
     }
     chunks.push(finalRows);
-    return { compact: compact, chunks: chunks, orientation: orientation };
+    return { chunks: chunks, orientation: orientation };
   }
 
-  // Rebuild and measure the exact final page structures (including real page
-  // numbers and continuation headers) before opening the browser print UI.
-  // This is the last safety net against CSS/rounding drift after planning.
-  function verifyPrintPlanFits(plan) {
+  /*
+   * Builds the exact page elements a plan describes — real page numbers,
+   * continuation headers and all — and solves each one's rhythm against its
+   * own A4 box. This is both the last safety net against CSS/rounding drift
+   * after planning, and where every printed page gets the setting that makes
+   * its content fill the sheet.
+   */
+  function realizePrintPlan(plan) {
     var totalPages = plan.chunks.length;
+    var pages = [];
     var startIndex = 0;
     for (var index = 0; index < totalPages; index += 1) {
       var chunk = plan.chunks[index];
       var page = clonePrintPage(chunk, {
         orientation: plan.orientation,
-        compact: plan.compact,
-        condensed: plan.condensed,
         continuation: index > 0,
         finalPage: index === totalPages - 1,
         startIndex: startIndex,
@@ -3143,32 +3281,19 @@
         totalPages: totalPages,
       });
       startIndex += chunk.length;
-      if (!pageFits(page)) return { fits: false, pageNo: index + 1 };
+      var fitted = fitMountedPage(page, chunk.length, { stretchRows: totalPages === 1 });
+      if (!fitted) return { pages: null, pageNo: index + 1 };
+      pages.push(page);
     }
-    return { fits: true, pageNo: null };
+    return { pages: pages, pageNo: null };
   }
 
-  function renderPrintPlan(plan) {
+  function renderPrintPlan(pages) {
     printDocumentEl.innerHTML = "";
-    var totalPages = plan.chunks.length;
-    var startIndex = 0;
-    plan.chunks.forEach(function (chunk, index) {
-      var page = clonePrintPage(chunk, {
-        orientation: plan.orientation,
-        compact: plan.compact,
-        condensed: plan.condensed,
-        continuation: index > 0,
-        finalPage: index === totalPages - 1,
-        startIndex: startIndex,
-        pageNo: index + 1,
-        totalPages: totalPages,
-      });
-      startIndex += chunk.length;
-      printDocumentEl.appendChild(page);
-    });
+    pages.forEach(function (page) { printDocumentEl.appendChild(page); });
     document.body.classList.add("print-mode");
     printDocumentEl.setAttribute("aria-hidden", "false");
-    return totalPages;
+    return pages.length;
   }
 
   function cleanupPrintDocument() {
@@ -3237,7 +3362,7 @@
           " بلندتر از ظرفیت یک صفحهٔ A4 است؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد. شرح را کوتاه‌تر یا به چند ردیف تقسیم کنید"
         );
         overflowStatus = "چاپ انجام نشد؛ یک ردیف در صفحهٔ A4 جا نمی‌شود.";
-      } else if (diagnoseFinalPageOverflow(rows, plan.orientation, plan.compact) === "notes") {
+      } else if (diagnoseFinalPageOverflow(rows, plan.orientation) === "notes") {
         warnings.push(
           "متن «توضیحات» بلندتر از فضای باقی‌ماندهٔ صفحهٔ پایانی است؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد. متن توضیحات را کوتاه‌تر کنید"
         );
@@ -3253,10 +3378,10 @@
       setStatus(overflowStatus);
       return false;
     }
-    var fitVerification = verifyPrintPlanFits(plan);
-    if (!fitVerification.fits) {
+    var realized = realizePrintPlan(plan);
+    if (!realized.pages) {
       warnings.push(
-        "صفحهٔ " + toPersianDigits(fitVerification.pageNo) +
+        "صفحهٔ " + toPersianDigits(realized.pageNo) +
         " در محدودهٔ A4 جا نمی‌شود؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد"
       );
       renderOutputWarnings(warnings);
@@ -3267,7 +3392,7 @@
     if (plan.chunks.length > 1) warnings.push("این پیش‌فاکتور در " + toPersianDigits(plan.chunks.length) + " صفحه چاپ می‌شود");
     renderOutputWarnings(warnings);
 
-    renderPrintPlan(plan);
+    renderPrintPlan(realized.pages);
     var data = collectInvoiceData();
     commitInvoiceNumber(data.company.profile, data.meta.number);
     numberIsAutoSuggested = false;

@@ -16,6 +16,18 @@
  * comments for the reasoning. Only inputs/textareas are swapped for plain
  * elements and the delete-row column is dropped outright (there's nothing
  * to delete in a finished PDF).
+ *
+ * KNOWN DIVERGENCE. The app now sizes its sheet with a solved vertical
+ * rhythm — one --print-density scalar that every vertical dimension is a
+ * straight line in, bisected until the content fills A4 exactly for whatever
+ * number of items the document carries (see the knob table in
+ * css/invoice.css and fitSheetToPage in js/app.js). This stylesheet is still
+ * the fixed layout that preceded it: correct, but always set at one density,
+ * so a short invoice leaves a band of blank paper above the totals and a long
+ * one has no room to give. Porting the solver here means running the same
+ * bisection inside the rendering page before page.pdf() in pdf.js — the
+ * browser is already there, it just has not been asked. The columns and the
+ * retired تخفیف columns ARE in sync.
  */
 
 export function invoiceStyles(fontDataUri) {
@@ -83,15 +95,16 @@ html, body {
   padding: 6mm 10mm 6mm;
   font-size: 8.7pt;
 
+  /* The app's own --col-* percentages (css/invoice.css), renormalized over
+     the 97% they share there once its screen-only delete column is dropped:
+     4 / 47 / 7 / 6 / 16 / 17, each divided by 0.97. */
   --col-row: 4.124%;
-  --col-desc: 34.021%;
-  --col-qty: 6.186%;
-  --col-unit: 5.155%;
-  --col-price: 13.402%;
-  --col-total: 13.402%;
-  --col-discount: 10.309%;
-  --col-net: 13.402%;
-  --totals-span: calc(var(--col-net) + var(--col-discount) + var(--col-total));
+  --col-desc: 48.454%;
+  --col-qty: 7.216%;
+  --col-unit: 6.186%;
+  --col-price: 16.495%;
+  --col-total: 17.526%;
+  --totals-span: calc(var(--col-price) + var(--col-total));
 }
 
 .inv-head {
@@ -302,8 +315,7 @@ html, body {
 
 .inv-table td.col-desc { text-align: center; overflow-wrap: break-word; }
 .inv-table td.col-qty, .inv-table td.col-unit,
-.inv-table td.col-price, .inv-table td.col-discount,
-.inv-table td.col-total, .inv-table td.col-net { text-align: center; }
+.inv-table td.col-price, .inv-table td.col-total { text-align: center; }
 
 .col-row { width: var(--col-row); }
 .col-desc { width: var(--col-desc); }
@@ -311,8 +323,6 @@ html, body {
 .col-unit { width: var(--col-unit); }
 .col-price { width: var(--col-price); }
 .col-total { width: var(--col-total); }
-.col-discount { width: var(--col-discount); }
-.col-net { width: var(--col-net); }
 
 .inv-table thead { display: table-header-group; }
 .inv-table tbody tr:nth-child(even) td { background: var(--surface); }
@@ -363,6 +373,9 @@ html, body {
     "words  notes buyer seller";
   grid-template-rows: minmax(0, 1fr) auto;
   break-inside: avoid;
+  /* A fixed gap below the items table. The app spends its leftover sheet
+     height here instead (margin-top: auto, filled by the rhythm solver); see
+     the KNOWN DIVERGENCE note at the top of this file. */
   margin-top: 2mm;
 }
 

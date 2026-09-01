@@ -37,3 +37,23 @@ describe("buildInvoiceHtml buyer details", () => {
 		expect(html).not.toMatch(/N\/A|نامشخص|—|ندارد/);
 	});
 });
+
+describe("buildInvoiceHtml items table", () => {
+	it("carries no discount column, computed partner, or totals row", () => {
+		const html = buildInvoiceHtml(baseInvoiceData());
+		// The desktop app retired تخفیف / مبلغ پس از تخفیف; this template mirrors
+		// its sheet, so the two documents must have the same six columns.
+		expect(html).not.toContain("تخفیف");
+		expect(html).not.toContain("col-discount");
+		expect(html).not.toContain("col-net");
+		const headers = [...html.matchAll(/<th>([^<]*)<\/th>/g)].map((match) => match[1]);
+		expect(headers).toEqual([
+			"ردیف",
+			"شرح کالا یا خدمات",
+			"تعداد / مقدار",
+			"واحد",
+			"مبلغ واحد (ریال)",
+			"مبلغ کل (ریال)",
+		]);
+	});
+});

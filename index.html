@@ -273,8 +273,6 @@
           <col class="col-unit" />
           <col class="col-price" />
           <col class="col-total" />
-          <col class="col-discount" />
-          <col class="col-net" />
         </colgroup>
         <thead>
           <tr>
@@ -285,8 +283,6 @@
             <th>واحد</th>
             <th>مبلغ واحد (ریال)</th>
             <th>مبلغ کل (ریال)</th>
-            <th>تخفیف (ریال)</th>
-            <th>مبلغ پس از تخفیف (ریال)</th>
           </tr>
         </thead>
         <tbody id="inv-rows"></tbody>
@@ -297,14 +293,6 @@
           <div>
             <span>جمع کل</span>
             <strong data-total="grossTotal">۰ ریال</strong>
-          </div>
-          <div>
-            <span>جمع تخفیف</span>
-            <strong data-total="discountTotal">۰ ریال</strong>
-          </div>
-          <div>
-            <span>جمع کل پس از تخفیف</span>
-            <strong data-total="afterDiscountTotal">۰ ریال</strong>
           </div>
           <div class="inv-tax-row">
             <span>
@@ -431,8 +419,6 @@
     <td><input type="text" class="cell-input" data-row-field="unit" aria-label="واحد" /></td>
     <td><input type="text" inputmode="decimal" dir="ltr" class="cell-input cell-input-num" data-row-field="unitPrice" aria-label="مبلغ واحد" /></td>
     <td class="cell-computed" data-row-computed="total">۰</td>
-    <td><input type="text" inputmode="decimal" dir="ltr" class="cell-input cell-input-num" data-row-field="discount" aria-label="تخفیف" /></td>
-    <td class="cell-computed" data-row-computed="afterDiscount">۰</td>
   </tr>
 </template>
 

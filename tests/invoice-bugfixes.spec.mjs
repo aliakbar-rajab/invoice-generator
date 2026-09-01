@@ -35,8 +35,7 @@ const ROW_LABEL = {
   description: "شرح کالا یا خدمت",
   quantity: "تعداد یا مقدار",
   unit: "واحد",
-  unitPrice: "مبلغ واحد",
-  discount: "تخفیف"
+  unitPrice: "مبلغ واحد"
 };
 const cell = (page, n, field) => page.getByLabel(`ردیف ${persian(n)} — ${ROW_LABEL[field]}`, { exact: true });
 const warnings = (page) => page.locator("#invoice-validation-list li");
@@ -120,29 +119,6 @@ test("malformed grouping is rejected in the quantity", async ({ page }) => {
   await expect(cell(page, 1, "quantity")).toHaveValue("۱٬۲۳۴٫۵۶۷");
 });
 
-test("a malformed discount is reported, never silently treated as zero", async ({ page }) => {
-  await openApp(page);
-  await fillValidFirstRow(page, "1000");
-  await page.getByLabel("درصد مالیات و عوارض", { exact: true }).fill("0");
-  for (const bad of MALFORMED_GROUPING) {
-    await cell(page, 1, "discount").fill(bad);
-    await cell(page, 1, "discount").blur();
-    await expect(warnings(page), `discount "${bad}" must be rejected`)
-      .toContainText("تخفیف معتبر نیست");
-  }
-  // An empty discount still legitimately means zero — that is the case the
-  // malformed/empty distinction exists to protect.
-  await cell(page, 1, "discount").fill("");
-  await cell(page, 1, "discount").blur();
-  await expect(warnings(page)).toHaveCount(0);
-  await expect(page.locator('[data-total="netTotal"]')).toHaveText("۱٬۰۰۰ ریال");
-  // And valid grouping still discounts.
-  await cell(page, 1, "discount").fill("1,000");
-  await cell(page, 1, "discount").blur();
-  await expect(warnings(page)).toHaveCount(0);
-  await expect(page.locator('[data-total="netTotal"]')).toHaveText("۰ ریال");
-});
-
 test("a malformed tax rate is reported and blocks output, never applied as ten times itself", async ({ page }) => {
   await openApp(page);
   await fillValidFirstRow(page, "1000");
@@ -166,10 +142,9 @@ test("the app's own formatted figures survive a save and reopen unchanged", asyn
   await cell(page, 1, "description").fill("میلگرد");
   await cell(page, 1, "quantity").fill("2٫5");
   await cell(page, 1, "unitPrice").fill("1,200,000");
-  await cell(page, 1, "discount").fill("200,000");
   await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار");
   await page.getByLabel("درصد مالیات و عوارض", { exact: true }).blur();
-  await expect(page.locator('[data-total="netTotal"]')).toHaveText("۳٬۰۸۰٬۰۰۰ ریال");
+  await expect(page.locator('[data-total="netTotal"]')).toHaveText("۳٬۳۰۰٬۰۰۰ ریال");
 
   await page.getByRole("button", { name: "ذخیره", exact: true }).click();
   await page.locator("#app-dialog-input").fill("گرد کردن");
@@ -179,7 +154,7 @@ test("the app's own formatted figures survive a save and reopen unchanged", asyn
   await page.evaluate(() => document.getElementById("btn-saved-list").click());
   await page.locator("#saved-list button", { hasText: "باز کردن" }).first().click();
 
-  await expect(page.locator('[data-total="netTotal"]')).toHaveText("۳٬۰۸۰٬۰۰۰ ریال");
+  await expect(page.locator('[data-total="netTotal"]')).toHaveText("۳٬۳۰۰٬۰۰۰ ریال");
   await expect(warnings(page)).toHaveCount(0);
 });
 

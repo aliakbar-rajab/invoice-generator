@@ -32,7 +32,7 @@ export function computeTotals(items) {
     return { ...item, lineTotal };
   });
   const grossTotal = lines.reduce((sum, l) => sum + l.lineTotal, 0n);
-  return { lines, grossTotal, discountTotal: 0n, afterDiscountTotal: grossTotal, taxTotal: 0n, netTotal: grossTotal };
+  return { lines, grossTotal, taxTotal: 0n, netTotal: grossTotal };
 }
 
 function partyField(label, value, ltr) {
@@ -48,8 +48,6 @@ function itemRow(index, line) {
     <td class="col-unit">${escapeHtml(line.unit || "")}</td>
     <td class="col-price cell-computed">${formatBigRial(line.unitPriceRial)}</td>
     <td class="col-total cell-computed">${formatBigRial(line.lineTotal)}</td>
-    <td class="col-discount cell-computed">${formatBigRial(0n)}</td>
-    <td class="col-net cell-computed">${formatBigRial(line.lineTotal)}</td>
   </tr>`;
 }
 
@@ -65,8 +63,6 @@ function blankItemRow(index) {
     <td class="col-unit"></td>
     <td class="col-price cell-computed"></td>
     <td class="col-total cell-computed">${formatBigRial(0n)}</td>
-    <td class="col-discount cell-computed"></td>
-    <td class="col-net cell-computed">${formatBigRial(0n)}</td>
   </tr>`;
 }
 
@@ -102,7 +98,7 @@ export function buildInvoiceHtml(data) {
     items,
     includeStamp,
   } = data;
-  const { lines, grossTotal, discountTotal, afterDiscountTotal, taxTotal, netTotal } = computeTotals(items);
+  const { lines, grossTotal, taxTotal, netTotal } = computeTotals(items);
 
   const realRowsHtml = lines.map((line, i) => itemRow(i + 1, line));
   const blankRowCount = Math.max(0, LANDSCAPE_MIN_ROWS - lines.length);
@@ -165,12 +161,12 @@ export function buildInvoiceHtml(data) {
     <table class="inv-table">
       <colgroup>
         <col class="col-row" /><col class="col-desc" /><col class="col-qty" /><col class="col-unit" />
-        <col class="col-price" /><col class="col-total" /><col class="col-discount" /><col class="col-net" />
+        <col class="col-price" /><col class="col-total" />
       </colgroup>
       <thead>
         <tr>
           <th>ردیف</th><th>شرح کالا یا خدمات</th><th>تعداد / مقدار</th><th>واحد</th>
-          <th>مبلغ واحد (ریال)</th><th>مبلغ کل (ریال)</th><th>تخفیف (ریال)</th><th>مبلغ پس از تخفیف (ریال)</th>
+          <th>مبلغ واحد (ریال)</th><th>مبلغ کل (ریال)</th>
         </tr>
       </thead>
       <tbody>${rowsHtml}</tbody>
@@ -180,8 +176,6 @@ export function buildInvoiceHtml(data) {
   <section class="inv-summary">
     <div class="inv-totals">
       <div><span>جمع کل</span><strong>${formatBigRial(grossTotal)} ریال</strong></div>
-      <div><span>جمع تخفیف</span><strong>${formatBigRial(discountTotal)} ریال</strong></div>
-      <div><span>جمع کل پس از تخفیف</span><strong>${formatBigRial(afterDiscountTotal)} ریال</strong></div>
       <div><span>مالیات و عوارض (٪۰)</span><strong>${formatBigRial(taxTotal)} ریال</strong></div>
       <div class="inv-total-final"><span>مبلغ قابل پرداخت</span><strong>${formatBigRial(netTotal)} ریال</strong></div>
     </div>
