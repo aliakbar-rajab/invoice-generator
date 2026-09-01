@@ -33,8 +33,12 @@ describe("buildInvoiceHtml buyer details", () => {
 
 	it("leaves skipped buyer detail fields empty with no placeholder text", () => {
 		const html = buildInvoiceHtml(baseInvoiceData());
+		// Scoped to the party cards, not the whole document: the stylesheet is
+		// embedded in the page and its comments are prose, em dashes and all.
+		const parties = html.slice(html.indexOf('<section class="inv-parties">'), html.indexOf("</section>", html.indexOf("مشخصات خریدار")));
+		expect(parties).toContain("مشخصات خریدار");
 		// Buyer field values render as empty <span>s — no "N/A", "-", or similar filler.
-		expect(html).not.toMatch(/N\/A|نامشخص|—|ندارد/);
+		expect(parties).not.toMatch(/N\/A|نامشخص|—|ندارد/);
 	});
 });
 

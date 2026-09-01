@@ -24,6 +24,29 @@ const BUYER_ICON = `<svg class="inv-card-head-icon" viewBox="0 0 24 24"><circle 
 // real items than this gets no padding at all.
 const LANDSCAPE_MIN_ROWS = 7;
 
+// The printed form's per-sheet capacity, and the app's own
+// MAX_PRINT_ITEM_ROWS_PER_PAGE. Items are chunked at this here rather than
+// wherever a browser happens to run out of paper, so 17 items are 16 + 1 —
+// the split the app makes deliberately. layoutInvoicePages() in the render
+// browser only ever moves rows FORWARD from here, when a page's descriptions
+// wrap onto enough extra lines that even the tightest rhythm overflows.
+export const MAX_ROWS_PER_PAGE = 16;
+
+// Fills complete sheets before the remainder, so the last page carries
+// ((n - 1) % MAX) + 1 items rather than an arbitrary balance.
+function chunkItems(lines, perPage) {
+  if (lines.length <= perPage) return [lines];
+  const finalCount = ((lines.length - 1) % perPage) + 1;
+  const chunks = [];
+  let rest = lines.slice(0, lines.length - finalCount);
+  while (rest.length) {
+    chunks.push(rest.slice(0, perPage));
+    rest = rest.slice(perPage);
+  }
+  chunks.push(lines.slice(lines.length - finalCount));
+  return chunks;
+}
+
 // Computes per-item and invoice-level totals as exact BigInt Rial amounts.
 // quantityMilli/unitPriceRial are already-parsed BigInts (see persianNumbers).
 export function computeTotals(items) {
@@ -100,28 +123,25 @@ export function buildInvoiceHtml(data) {
   } = data;
   const { lines, grossTotal, taxTotal, netTotal } = computeTotals(items);
 
-  const realRowsHtml = lines.map((line, i) => itemRow(i + 1, line));
-  const blankRowCount = Math.max(0, LANDSCAPE_MIN_ROWS - lines.length);
-  const blankRowsHtml = Array.from({ length: blankRowCount }, (_, i) => blankItemRow(lines.length + i + 1));
-  const rowsHtml = [...realRowsHtml, ...blankRowsHtml].join("\n");
-
   const logoImg = company.logoDataUri
     ? `<img class="inv-logo" alt="آرم شرکت" src="${company.logoDataUri}" />`
     : "";
   const stampImg = includeStamp && company.stampDataUri
     ? `<img class="inv-signature-stamp" alt="مهر شرکت" src="${company.stampDataUri}" />`
     : "";
+  const continuationLogo = company.logoDataUri
+    ? `<img alt="" src="${company.logoDataUri}" />`
+    : "";
 
-  return `<!doctype html>
-<html dir="rtl" lang="fa">
-<head>
-<meta charset="utf-8" />
-<title>پیش‌فاکتور</title>
-<style>${invoiceStyles(fontDataUri)}</style>
-</head>
-<body>
-<article class="invoice-sheet orientation-landscape" dir="rtl">
-  <header class="inv-head">
+  const rowsHtml = lines.map((line, i) => itemRow(i + 1, line));
+  // Blank filler rows belong to a single-sheet invoice only: on a document
+  // that already runs to a second page there is nothing to fill out.
+  if (rowsHtml.length <= LANDSCAPE_MIN_ROWS) {
+    for (let i = rowsHtml.length; i < LANDSCAPE_MIN_ROWS; i += 1) rowsHtml.push(blankItemRow(i + 1));
+  }
+  const chunks = chunkItems(rowsHtml, MAX_ROWS_PER_PAGE);
+
+  const fullHead = `<header class="inv-head">
     <p class="inv-doc-title">پیش‌فاکتور</p>
     <div class="inv-brand">
       <span class="inv-logo-chip">${logoImg}</span>
@@ -132,9 +152,20 @@ export function buildInvoiceHtml(data) {
       <div><dt>${NUMBER_ICON}<span>شماره پیش‌فاکتور</span></dt><dd>${escapeHtml(docNumber)}</dd></div>
       <div class="inv-meta-validity"><dt>${CLOCK_ICON}<span>اعتبار پیش‌فاکتور</span></dt><dd>${escapeHtml(validity)}</dd></div>
     </dl>
-  </header>
+  </header>`;
 
-  <section class="inv-parties">
+  // Page numbers are left to layoutInvoicePages(): it may add or drop a page
+  // during relief, so it is the only place that knows the final count.
+  const continuationHead = `<header class="print-continuation-head">
+    <div class="print-continuation-brand">${continuationLogo}<strong>${escapeHtml(company.name)}</strong></div>
+    <div class="print-continuation-title">ادامهٔ پیش‌فاکتور</div>
+    <div class="print-continuation-meta">
+      <div>شماره: ${escapeHtml(docNumber)}</div>
+      <div>تاریخ: ${escapeHtml(docDate)} · صفحه ۱ از ۱</div>
+    </div>
+  </header>`;
+
+  const parties = `<section class="inv-parties">
     <div class="inv-card" aria-label="مشخصات فروشنده">
       <header class="inv-card-head">${SELLER_ICON}مشخصات فروشنده</header>
       <div class="inv-card-grid">
@@ -155,9 +186,9 @@ export function buildInvoiceHtml(data) {
         ${partyField("تلفن", buyerPhone || "", true)}
       </div>
     </div>
-  </section>
+  </section>`;
 
-  <div class="inv-table-frame">
+  const tableFrame = (pageRowsHtml) => `<div class="inv-table-frame">
     <table class="inv-table">
       <colgroup>
         <col class="col-row" /><col class="col-desc" /><col class="col-qty" /><col class="col-unit" />
@@ -169,11 +200,11 @@ export function buildInvoiceHtml(data) {
           <th>مبلغ واحد (ریال)</th><th>مبلغ کل (ریال)</th>
         </tr>
       </thead>
-      <tbody>${rowsHtml}</tbody>
+      <tbody>${pageRowsHtml.join("\n")}</tbody>
     </table>
-  </div>
+  </div>`;
 
-  <section class="inv-summary">
+  const closingBlock = `<section class="inv-summary">
     <div class="inv-totals">
       <div><span>جمع کل</span><strong>${formatBigRial(grossTotal)} ریال</strong></div>
       <div><span>مالیات و عوارض (٪۰)</span><strong>${formatBigRial(taxTotal)} ریال</strong></div>
@@ -197,8 +228,32 @@ export function buildInvoiceHtml(data) {
     </div>
   </section>
 
-  <footer class="inv-footer"><p class="inv-footer-site">${escapeHtml(company.website)}</p></footer>
-</article>
+  <footer class="inv-footer"><p class="inv-footer-site">${escapeHtml(company.website)}</p></footer>`;
+
+  const continuationNote = `ادامه در صفحهٔ بعد · پیش‌فاکتور ${docNumber}`;
+  const pagesHtml = chunks.map((chunk, index) => {
+    const isFirst = index === 0;
+    const isLast = index === chunks.length - 1;
+    return `<article class="invoice-sheet orientation-landscape" dir="rtl">
+  ${isFirst ? fullHead + "\n\n  " + parties : continuationHead}
+
+  ${tableFrame(chunk)}
+
+  ${isLast ? closingBlock : `<div class="print-page-marker">${escapeHtml(continuationNote)}</div>`}
+</article>`;
+  }).join("\n");
+
+  return `<!doctype html>
+<html dir="rtl" lang="fa">
+<head>
+<meta charset="utf-8" />
+<title>پیش‌فاکتور</title>
+<style>${invoiceStyles(fontDataUri)}</style>
+</head>
+<body data-continuation-note="${escapeHtml(continuationNote)}">
+${pagesHtml}
+<template id="continuation-head-template">${continuationHead}</template>
 </body>
 </html>`;
 }
+

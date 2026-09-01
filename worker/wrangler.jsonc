@@ -13,6 +13,16 @@
 	"observability": {
 		"enabled": true
 	},
+	/**
+	 * layoutInvoicePages (src/lib/invoiceLayout.js) is shipped INTO the render
+	 * browser by page.evaluate, which serialises it with Function.toString().
+	 * esbuild's keep-names pass rewrites named inner functions as
+	 * `__name(fn, "fn")` — and `__name` is a module-scope helper that does not
+	 * exist in that page, so the serialised copy throws "__name is not
+	 * defined" the moment it runs. Nothing here needs the original .name.
+	 * https://esbuild.github.io/api/#keep-names
+	 */
+	"keep_names": false,
 	"upload_source_maps": true,
 	/**
 	 * Static Assets (invoice logos, stamps, embedded font — read at runtime via

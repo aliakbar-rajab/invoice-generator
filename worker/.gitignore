@@ -4,6 +4,7 @@ node_modules/
 # Wrangler build output and local state
 .wrangler/
 dist/
+tmp/
 
 # Playwright
 test-results/

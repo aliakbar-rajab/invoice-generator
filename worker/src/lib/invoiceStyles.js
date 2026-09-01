@@ -17,17 +17,16 @@
  * elements and the delete-row column is dropped outright (there's nothing
  * to delete in a finished PDF).
  *
- * KNOWN DIVERGENCE. The app now sizes its sheet with a solved vertical
- * rhythm — one --print-density scalar that every vertical dimension is a
- * straight line in, bisected until the content fills A4 exactly for whatever
- * number of items the document carries (see the knob table in
- * css/invoice.css and fitSheetToPage in js/app.js). This stylesheet is still
- * the fixed layout that preceded it: correct, but always set at one density,
- * so a short invoice leaves a band of blank paper above the totals and a long
- * one has no room to give. Porting the solver here means running the same
- * bisection inside the rendering page before page.pdf() in pdf.js — the
- * browser is already there, it just has not been asked. The columns and the
- * retired تخفیف columns ARE in sync.
+ * The sheet is sized by the same solved vertical rhythm as the app: one
+ * --print-density scalar that every vertical dimension below is a straight
+ * line in, bisected at render time until the content fills A4 exactly for
+ * whatever number of items the document carries. The knob table below mirrors
+ * css/invoice.css; the bisection itself is invoiceLayout.js, run inside the
+ * rendering page by pdf.js before the PDF is taken.
+ *
+ * The values here are the app's EFFECTIVE ones — i.e. what its trailing
+ * "print-first refinement layer" resolves to, not the base rules that layer
+ * overrides. When the two files drift, that is the comparison to make.
  */
 
 export function invoiceStyles(fontDataUri) {
@@ -59,18 +58,52 @@ html, body {
   --muted-strong: #303335;
   --line: #9aa0a3;
   --line-soft: #b9bec1;
-  --surface: #e0e0e0;
+  --surface: #d8d8d8;
   --band-ink: var(--ink);
   --band-muted: var(--muted);
   --band-line: var(--line);
   --band-grad: var(--paper);
-  --edge: 0.6mm;
-  --band-fill: #e0e0e0;
+  --edge: 0.42mm;
+  /* The app's header/footer band under its default "هدر و فوتر خاکستری"
+     setting, which is on for every document the bot renders. */
+  --band-fill: #e4e4e4;
   --accent-ink: #000000;
   --accent-2: var(--muted);
   --pay-fill: #ededed;
-  --sig-w: 46mm;
-  --sig-h: 46mm;
+  --sig-w: 44mm;
+
+  /*
+   * VERTICAL RHYTHM. --print-density runs 0 (tightest still-comfortable) to 1
+   * (most generous) and every vertical dimension on the sheet is a straight
+   * line between those ends, so the sheet's natural height is monotonic in it
+   * and layoutInvoicePages() can bisect for the setting that fills the page.
+   * The two --print-*-extra values take the residual on a document too short
+   * to fill A4 even at 1. Mirrors css/invoice.css — same names, same numbers.
+   */
+  --print-density: 1;
+  --print-row-extra: 0mm;
+  --print-block-extra: 0mm;
+  --doc-font-scale: 1;
+
+  --rhythm-pad-block:    calc(4.6mm  + 2.4mm  * var(--print-density));
+  --rhythm-head-pad:     calc(1.1mm  + 1.5mm  * var(--print-density));
+  --rhythm-brand-gap:    calc(0.7mm  + 1.7mm  * var(--print-density));
+  --rhythm-logo:         calc(11mm   + 6mm    * var(--print-density));
+  --rhythm-parties-gap:  calc(0.9mm  + 1.6mm  * var(--print-density));
+  --rhythm-card-head:    calc(0.55mm + 0.75mm * var(--print-density));
+  --rhythm-card-pad:     calc(0.5mm  + 0.9mm  * var(--print-density));
+  --rhythm-card-rowgap:  calc(0.15mm + 0.75mm * var(--print-density));
+  --rhythm-th-pad:       calc(0.65mm + 0.75mm * var(--print-density));
+  --rhythm-td-pad:       calc(0.28mm + 0.5mm  * var(--print-density));
+  --rhythm-cell-line:    calc(1.35em  + 0.2em   * var(--print-density));
+  --rhythm-row-h:        calc(4.6mm  + 2.4mm  * var(--print-density) + var(--print-row-extra));
+  --rhythm-summary-gap:  calc(1.2mm  + 1.6mm  * var(--print-density));
+  --rhythm-totals-row:   calc(3.4mm  + 2.6mm  * var(--print-density));
+  --rhythm-payable:      calc(8.4mm  + 3.4mm  * var(--print-density));
+  --rhythm-words:        calc(5.6mm  + 2.4mm  * var(--print-density));
+  --rhythm-footer-gap:   calc(1mm    + 1.4mm  * var(--print-density));
+  --rhythm-footer-pad:   calc(0.85mm + 1.05mm * var(--print-density));
+  --sig-h:               calc(33mm   + 15mm   * var(--print-density) + var(--print-block-extra));
 
   position: relative;
   display: flex;
@@ -91,9 +124,10 @@ html, body {
 
 .invoice-sheet.orientation-landscape {
   width: 297mm;
-  min-height: 210mm;
-  padding: 6mm 10mm 6mm;
-  font-size: 8.7pt;
+  height: 210mm;
+  padding: var(--rhythm-pad-block) 10mm;
+  overflow: hidden;
+  font-size: calc(8.8pt * var(--doc-font-scale));
 
   /* The app's own --col-* percentages (css/invoice.css), renormalized over
      the 97% they share there once its screen-only delete column is dropped:
@@ -112,11 +146,11 @@ html, body {
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
   gap: 4mm;
-  padding: 2.2mm 4.5mm;
+  padding: var(--rhythm-head-pad) 4.2mm;
   background: var(--band-fill);
   color: var(--band-ink);
   border: var(--edge) solid var(--ink);
-  border-radius: 2.5mm;
+  border-radius: 1mm;
   break-inside: avoid;
 }
 
@@ -125,7 +159,7 @@ html, body {
   min-width: 34mm;
   max-width: 100%;
   padding: 0.5mm 1mm;
-  font-size: 16.5pt;
+  font-size: calc(16.5pt * var(--doc-font-scale));
   font-weight: 800;
   letter-spacing: 0.05em;
   color: var(--band-ink);
@@ -135,7 +169,7 @@ html, body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2.2mm;
+  gap: var(--rhythm-brand-gap);
   min-width: 0;
 }
 
@@ -148,7 +182,7 @@ html, body {
 }
 
 .inv-logo, .inv-signature-stamp { filter: grayscale(1); }
-.inv-logo { display: block; object-fit: contain; width: 17mm; height: 17mm; }
+.inv-logo { display: block; object-fit: contain; width: var(--rhythm-logo); height: var(--rhythm-logo); }
 
 .inv-brand-text {
   min-width: 0;
@@ -160,7 +194,7 @@ html, body {
 }
 
 .inv-brand-text h1 {
-  font-size: 12.5pt;
+  font-size: calc(12.5pt * var(--doc-font-scale));
   line-height: 1.25;
   font-weight: 800;
   color: var(--band-ink);
@@ -191,7 +225,7 @@ html, body {
   gap: 1.2mm;
   white-space: nowrap;
   color: var(--muted-strong);
-  font-size: 7.4pt;
+  font-size: calc(7.4pt * var(--doc-font-scale));
 }
 
 .inv-meta-icon, .inv-card-head-icon {
@@ -208,7 +242,7 @@ html, body {
 .inv-meta dd {
   width: 34mm;
   text-align: left;
-  font-size: 9.2pt;
+  font-size: calc(9.2pt * var(--doc-font-scale));
   font-weight: 400;
   color: var(--ink);
 }
@@ -224,13 +258,13 @@ html, body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4mm;
-  margin-block: 2.2mm 1.8mm;
+  margin-block: var(--rhythm-parties-gap);
   break-inside: avoid;
 }
 
 .inv-card {
   border: 1px solid var(--line);
-  border-radius: 2.5mm;
+  border-radius: 0.75mm;
   overflow: hidden;
   background: var(--paper);
 }
@@ -239,11 +273,11 @@ html, body {
   display: flex;
   align-items: center;
   gap: 2mm;
-  padding: 1.1mm 3mm;
-  background: var(--band-grad);
+  padding: var(--rhythm-card-head) 3mm;
+  background: #fff;
   color: var(--band-ink);
-  border-bottom: 0.35mm solid var(--ink);
-  font-size: 8.8pt;
+  border-bottom: 0.3mm solid var(--ink);
+  font-size: calc(8.8pt * var(--doc-font-scale));
   font-weight: 800;
   letter-spacing: 0.01em;
 }
@@ -253,17 +287,18 @@ html, body {
 .inv-card-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 0.7mm 6mm;
-  padding: 1.2mm 3mm 1.4mm;
+  gap: var(--rhythm-card-rowgap) 5mm;
+  padding: var(--rhythm-card-pad) 3mm;
 }
 
-.inv-field { display: flex; align-items: baseline; gap: 1.6mm; min-width: 0; }
+.inv-field { display: flex; align-items: flex-start; gap: 1.6mm; min-width: 0; }
 .inv-field-wide { grid-column: 1 / -1; }
 
 .inv-field-label {
   flex: none;
+  padding-top: 0.4mm;
   color: var(--muted);
-  font-size: 7.4pt;
+  font-size: calc(7.9pt * var(--doc-font-scale));
   font-weight: 500;
 }
 .inv-field-label::after { content: ":"; }
@@ -272,23 +307,29 @@ html, body {
   flex: 1 1 auto;
   min-width: 0;
   padding: 0 0 0.4mm;
-  font-size: 9.2pt;
+  font-size: calc(9pt * var(--doc-font-scale));
+  line-height: 1.45;
   font-weight: 700;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .inv-card [data-align="ltr"] { text-align: right; }
 
 .inv-table-frame {
-  border: 1px solid var(--line);
-  border-radius: 2mm;
+  border: 1px solid #8e9396;
+  border-radius: 0.75mm;
   overflow: hidden;
   break-inside: avoid;
+  /* The guaranteed minimum air below the table; any height the sheet has left
+     over lands here too, via .inv-summary's auto top margin. */
+  margin-bottom: var(--rhythm-summary-gap);
 }
 
 .inv-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 
 .inv-table th, .inv-table td {
-  padding: 0.65mm 1.6mm;
+  padding: var(--rhythm-td-pad) 1.6mm;
   border: none;
   border-bottom: 1px solid var(--line-soft);
   vertical-align: middle;
@@ -301,9 +342,9 @@ html, body {
 .inv-table th + th { border-inline-start: 1px solid var(--band-line); }
 
 .inv-table th {
-  padding-block: 1.3mm;
-  background: var(--band-grad);
-  border-bottom: 0.5mm solid var(--ink);
+  padding-block: var(--rhythm-th-pad);
+  background: #fff;
+  border-bottom: 0.42mm solid var(--ink);
   font-weight: 800;
   font-size: 0.88em;
   line-height: 1.3;
@@ -328,6 +369,11 @@ html, body {
 .inv-table tbody tr:nth-child(even) td { background: var(--surface); }
 .inv-table tr { break-inside: avoid; }
 
+/* A minimum, not a cap: a row whose شرح wraps to two lines is taller than
+   this and stays taller — which is exactly what the fit solver measures. */
+.inv-table tbody tr { height: var(--rhythm-row-h); }
+.inv-table td.col-desc { min-height: var(--rhythm-cell-line); }
+
 .row-index-badge {
   display: inline-flex;
   align-items: center;
@@ -345,11 +391,11 @@ html, body {
 .inv-amount-words {
   display: block;
   min-width: 0;
-  min-height: 7mm;
+  min-height: var(--rhythm-words);
   margin: 0;
   padding: 0.55mm 2.5mm;
   border: 1px solid var(--ink);
-  border-radius: 1.5mm;
+  border-radius: 0.75mm;
   font-size: 0.9em;
   line-height: 1.3;
   white-space: normal;
@@ -373,10 +419,11 @@ html, body {
     "words  notes buyer seller";
   grid-template-rows: minmax(0, 1fr) auto;
   break-inside: avoid;
-  /* A fixed gap below the items table. The app spends its leftover sheet
-     height here instead (margin-top: auto, filled by the rhythm solver); see
-     the KNOWN DIVERGENCE note at the top of this file. */
-  margin-top: 2mm;
+  /* The sheet is a flex column, so this collects whatever height the solver
+     could not spend on the blocks themselves and puts it in ONE place — the
+     seam between the items table and the commercial closing block. Everything
+     below then sits flush against the bottom edge. */
+  margin-top: auto;
 }
 
 .inv-totals { grid-area: totals; }
@@ -392,7 +439,7 @@ html, body {
   background: var(--band-grad);
   color: var(--band-ink);
   border: var(--edge) solid var(--ink);
-  border-radius: 2.5mm;
+  border-radius: 0.75mm;
   overflow: hidden;
   padding-top: 0;
 }
@@ -402,7 +449,7 @@ html, body {
   align-items: center;
   justify-content: space-between;
   gap: 3mm;
-  min-height: 4.3mm;
+  min-height: var(--rhythm-totals-row);
   padding: 0.6mm 3mm;
   font-size: 0.97em;
   flex: 1 1 auto;
@@ -424,15 +471,15 @@ html, body {
 .inv-totals .inv-total-final {
   margin-top: auto;
   flex: 0 0 auto;
-  background: var(--pay-fill);
+  background: #f1f1f1;
   color: var(--accent-ink);
-  min-height: 11mm;
+  min-height: var(--rhythm-payable);
   padding-block: 1.8mm;
   border-top: var(--edge) solid var(--ink) !important;
 }
 
 .inv-totals .inv-total-final > span { color: var(--accent-ink); opacity: 0.82; font-weight: 800; }
-.inv-total-final strong { color: var(--accent-ink); font-size: 1.75em; font-weight: 800; }
+.inv-total-final strong { color: var(--accent-ink); font-size: 1.62em; font-weight: 800; }
 
 .inv-notes {
   direction: rtl;
@@ -440,7 +487,7 @@ html, body {
   flex-direction: column;
   gap: 0.5mm;
   border: 1px solid var(--line);
-  border-radius: 2mm;
+  border-radius: 0.75mm;
   padding: 1.1mm 3mm 1.4mm;
   min-width: 0;
   break-inside: avoid;
@@ -452,7 +499,7 @@ html, body {
 .inv-signature-block {
   direction: rtl;
   border: 1px solid var(--line);
-  border-radius: 2.5mm;
+  border-radius: 0.75mm;
   padding: 1.1mm 2.6mm 1.4mm;
   display: flex;
   flex-direction: column;
@@ -491,18 +538,21 @@ html, body {
   position: absolute;
   inset: 0;
   margin: auto;
-  max-width: min(95%, 36mm);
-  max-height: min(95%, 36mm);
+  max-width: min(88%, 31mm);
+  max-height: min(88%, 31mm);
   object-fit: contain;
 }
 
 .inv-footer {
-  margin-top: 2.1mm;
-  padding: 1.6mm 4.5mm;
+  /* A fixed gap rather than an auto one: the sheet's leftover height belongs
+     above the closing block (see .inv-summary), not split in two around it.
+     No backticks in this file's CSS — it is a JS template literal. */
+  margin-top: var(--rhythm-footer-gap);
+  padding: var(--rhythm-footer-pad) 4.5mm;
   background: var(--band-fill);
   color: var(--band-ink);
   border: var(--edge) solid var(--ink);
-  border-radius: 2.5mm;
+  border-radius: 0.75mm;
   font-size: 0.94em;
   position: relative;
   break-inside: avoid;
@@ -512,10 +562,74 @@ html, body {
   display: block;
   width: 100%;
   text-align: center;
-  font-family: Georgia, "Palatino Linotype", "Book Antiqua", serif;
-  font-size: 12pt;
-  font-weight: 400;
-  letter-spacing: 0.12em;
+  font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
+  font-size: calc(9.5pt * var(--doc-font-scale));
+  font-weight: 500;
+  letter-spacing: 0.035em;
+}
+
+/* ---------- Multi-page ---------- */
+
+/*
+ * One .invoice-sheet article per A4 sheet (no angle brackets in here: this
+ * stylesheet is served inside a style element, and a literal tag in a comment
+ * is one more thing for a test that greps the HTML to trip over). Items are
+ * chunked into
+ * pages of at most sixteen server-side (see invoiceTemplate.js), the same
+ * capacity the app's printed form has; page two onwards replaces the full
+ * header and the party cards with a continuation strip, and only the last
+ * page carries the closing block.
+ */
+.invoice-sheet + .invoice-sheet {
+  break-before: page;
+  page-break-before: always;
+}
+
+.print-continuation-head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 4mm;
+  padding: 2mm 3mm;
+  margin-bottom: 2mm;
+  border-block: 0.4mm solid #000;
+}
+
+.print-continuation-brand { display: flex; align-items: center; gap: 2.5mm; }
+.print-continuation-brand img { width: 11mm; height: 11mm; object-fit: contain; filter: grayscale(1); }
+.print-continuation-brand strong { font-size: calc(11pt * var(--doc-font-scale)); }
+.print-continuation-title { text-align: center; font-size: calc(12pt * var(--doc-font-scale)); font-weight: 850; }
+.print-continuation-meta { text-align: end; color: #35373a; font-size: calc(8.3pt * var(--doc-font-scale)); line-height: 1.7; }
+
+.print-page-marker {
+  margin-top: auto;
+  padding-top: 1.5mm;
+  border-top: 1px solid #777;
+  color: #4b4d50;
+  font-size: calc(8pt * var(--doc-font-scale));
+  text-align: center;
+}
+
+.print-page-number {
+  position: absolute;
+  inset-inline-end: 10mm;
+  bottom: 2.5mm;
+  color: #555;
+  font-size: calc(7.5pt * var(--doc-font-scale));
+}
+
+/*
+ * Natural-height measurement (layoutInvoicePages). A sheet normally reports
+ * the fixed A4 box it will be printed into, which says nothing about whether
+ * the content inside it is 30mm short or 5mm too tall. Under this class it
+ * reports the height its content actually wants — and because a flex line
+ * with no free space has none to distribute, .inv-summary's auto top margin
+ * collapses to zero, so what is measured is content, not content plus slack.
+ */
+.is-measuring-natural {
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: visible !important;
 }
 `;
 }
