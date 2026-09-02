@@ -6,6 +6,22 @@
 
 const API_ROOT = "https://api.telegram.org";
 
+/*
+ * Every message below is sent with parse_mode "HTML", so any user-typed text
+ * interpolated into one is markup until it is escaped. A company name or a
+ * شرح containing "<" (لوله <2 اینچ>, زاویه < 90) made Telegram reject the whole
+ * message with a parse error — which threw mid-flow and left the conversation
+ * without the keyboard it was about to send, i.e. stuck. Escape user text at
+ * every interpolation site; the surrounding template is the only part that is
+ * allowed to be markup.
+ */
+export function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 async function call(token, method, payload) {
   const res = await fetch(`${API_ROOT}/bot${token}/${method}`, {
     method: "POST",

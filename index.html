@@ -6,7 +6,12 @@
 <title>پیش‌فاکتور آفلاین</title>
 <link rel="stylesheet" href="css/invoice.css" />
 <link rel="stylesheet" href="css/app.css" />
-<style id="page-size-style">@page { size: A4 landscape; margin: 0; }</style>
+<!-- Landscape defaults, matching PAPER_MM/PAGE_SAFE_MARGIN_MM in js/app.js.
+     setOrientation() rewrites this element on every orientation change and at
+     boot, so these values are only ever used by a page whose script has not
+     run yet — but they have to agree with the sheet's own geometry even then,
+     or that page prints a 277x190mm sheet into a smaller box. -->
+<style id="page-size-style">@page { size: 297mm 210mm; margin: 10mm; }</style>
 </head>
 <body>
 <div id="app">

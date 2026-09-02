@@ -17,6 +17,34 @@
   // CSS px per millimetre at the 96dpi CSS reference resolution. Used by the
   // screen-preview scaler and print-page measurements.
   var MM_TO_PX = 96 / 25.4;
+
+  /*
+   * PRINTED SHEET GEOMETRY. Mirrors --page-w/--page-h in invoice.css, where
+   * the reasoning for the numbers is written out in full; the short version
+   * is that the sheet is deliberately smaller than the paper, because a sheet
+   * sized edge-to-edge cannot survive the print dialog changing the page box
+   * underneath it.
+   *
+   * PAPER_MM is the physical sheet the @page rule asks for, and
+   * PAGE_SAFE_MARGIN_MM the margin it asks the browser to centre the sheet
+   * in. That margin is a request, not a guarantee — Chrome's Margins control
+   * overrides it — so the band is sized to the SMALLEST box the dialog can
+   * hand back (Margins:Default, ~10mm a side) rather than the likeliest one.
+   * At that size the sheet fits under every Margins setting, and .print-slot
+   * centres whatever paper is left over around it.
+   *
+   * PAGE_BOX_MM must stay PAPER_MM minus twice PAGE_SAFE_MARGIN_MM, and must
+   * match --page-w/--page-h in invoice.css.
+   */
+  var PAGE_BOX_MM = {
+    landscape: { w: 277, h: 190 },
+    portrait: { w: 190, h: 277 },
+  };
+  var PAPER_MM = {
+    landscape: { w: 297, h: 210 },
+    portrait: { w: 210, h: 297 },
+  };
+  var PAGE_SAFE_MARGIN_MM = 10;
   var LEGACY_STORAGE_KEY = "preinvoice.autosave.v1";
   // Legacy monolithic storage is read only for migration/recovery. New saves
   // use one key per invoice so concurrent tabs can never overwrite unrelated
@@ -1485,7 +1513,13 @@
     sheet.classList.add("orientation-" + normalized);
     document.getElementById("orientation-landscape").checked = normalized === "landscape";
     document.getElementById("orientation-portrait").checked = normalized === "portrait";
-    pageStyleEl.textContent = "@page { size: A4 " + normalized + "; margin: 0; }";
+    // Explicit millimetres rather than "A4 landscape": the keyword form is
+    // resolved against the browser's own idea of A4 and its orientation
+    // handling, and older Chrome builds do not all land on the same box.
+    var paper = PAPER_MM[normalized];
+    pageStyleEl.textContent =
+      "@page { size: " + paper.w + "mm " + paper.h + "mm; margin: " +
+      PAGE_SAFE_MARGIN_MM + "mm; }";
     fitSheetScale();
     scheduleSheetRhythm();
   }
@@ -1497,10 +1531,10 @@
   // zoom under 900px). Uses `zoom` on the wrapper (never the sheet itself);
   // print output is guarded against any leftover factor by the
   // `zoom: 1 !important` rule in invoice.css. Sheet width is derived from
-  // the A4 dimensions directly (mm → CSS px) rather than measured, so the
+  // PAGE_BOX_MM directly (mm → CSS px) rather than measured, so the
   // already-applied zoom can never feed back into the calculation.
   function fitSheetScale() {
-    var sheetWidthPx = (currentOrientation() === "landscape" ? 297 : 210) * MM_TO_PX;
+    var sheetWidthPx = PAGE_BOX_MM[currentOrientation()].w * MM_TO_PX;
     var available = document.documentElement.clientWidth - 32; // viewport padding
     var scale = Math.min(1, available / sheetWidthPx);
     scaleWrapperEl.style.zoom = scale >= 1 ? "" : String(scale);
@@ -2815,7 +2849,24 @@
       var replacement = field.tagName === "TEXTAREA" ? document.createElement("div") : document.createElement("span");
       replacement.className = field.className + " print-field-value";
       replacement.classList.remove("no-screen");
-      replacement.removeAttribute("style");
+      /*
+       * The replacement is a fresh element, so it starts with no inline style
+       * at all — which quietly threw away the one inline style that carries
+       * meaning here. fitNumericEl shrinks a long figure's font-size, in
+       * place, until the whole number fits its column; that shrink lives on
+       * the input, and the input is what this function is deleting. A total
+       * (a <span>, not a control) survived cloning and kept its shrink, but
+       * the quantity and unit price beside it did not: the editor showed a
+       * 21-digit price on one shrunken line and the printed page showed the
+       * same price at full size, wrapped onto two, in a row 74% taller.
+       *
+       * Only font-size is carried. Every other inline style on a control here
+       * is a screen-layout artefact — autoGrowTextarea's pixel height above
+       * all — that print deliberately releases (see .print-page .cell-textarea
+       * in invoice.css), and copying those across is what the blanket
+       * removeAttribute("style") on this line was really guarding against.
+       */
+      if (field.style.fontSize) replacement.style.fontSize = field.style.fontSize;
       if (field.tagName === "SELECT") {
         replacement.textContent = field.options[field.selectedIndex] ? field.options[field.selectedIndex].text : "";
       } else {
@@ -2997,7 +3048,7 @@
   var NO_EXTRA = { row: 0, block: 0 };
 
   function pageHeightPx(orientation) {
-    return (orientation === "portrait" ? 297 : 210) * MM_TO_PX;
+    return PAGE_BOX_MM[orientation === "portrait" ? "portrait" : "landscape"].h * MM_TO_PX;
   }
 
   /*
@@ -3290,7 +3341,19 @@
 
   function renderPrintPlan(pages) {
     printDocumentEl.innerHTML = "";
-    pages.forEach(function (page) { printDocumentEl.appendChild(page); });
+    // Each sheet goes into a slot rather than straight into the document.
+    // The slot is one page box tall (100vh, which in print media resolves to
+    // whatever the page box actually is) and centres the sheet inside it, so
+    // the leftover paper that the safe band deliberately leaves over is split
+    // evenly on all four sides instead of collecting against two edges. It
+    // has to be a wrapper: the sheet itself cannot be stretched to the page
+    // box without stretching the design with it.
+    pages.forEach(function (page) {
+      var slot = document.createElement("div");
+      slot.className = "print-slot";
+      slot.appendChild(page);
+      printDocumentEl.appendChild(slot);
+    });
     document.body.classList.add("print-mode");
     printDocumentEl.setAttribute("aria-hidden", "false");
     return pages.length;

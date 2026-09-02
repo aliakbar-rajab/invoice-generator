@@ -85,7 +85,7 @@ html, body {
   --print-block-extra: 0mm;
   --doc-font-scale: 1;
 
-  --rhythm-pad-block:    calc(4.6mm  + 2.4mm  * var(--print-density));
+  --rhythm-pad-block:    calc(2mm    + 5mm    * var(--print-density));
   --rhythm-head-pad:     calc(1.1mm  + 1.5mm  * var(--print-density));
   --rhythm-brand-gap:    calc(0.7mm  + 1.7mm  * var(--print-density));
   --rhythm-logo:         calc(11mm   + 6mm    * var(--print-density));
@@ -96,6 +96,15 @@ html, body {
   --rhythm-th-pad:       calc(0.65mm + 0.75mm * var(--print-density));
   --rhythm-td-pad:       calc(0.28mm + 0.5mm  * var(--print-density));
   --rhythm-cell-line:    calc(1.35em  + 0.2em   * var(--print-density));
+  /* Leading for the metadata blocks — the header's date/number/validity strip
+     and the two party cards. Unitless so it cascades as a factor to fields set
+     at different sizes. Together those blocks are ~64mm of the sheet, all of
+     it single lines of text that used to sit on the font's own 1.45 default,
+     i.e. height the solver could not reach: it could tighten the space BETWEEN
+     the rows but not the rows themselves. Mirrors css/invoice.css. */
+  --rhythm-field-line:   calc(1.24   + 0.21   * var(--print-density));
+  --rhythm-meta-gap:     calc(0.5mm  + 0.5mm  * var(--print-density));
+  --rhythm-meta-pad:     calc(0.45mm + 0.35mm * var(--print-density));
   --rhythm-row-h:        calc(4.6mm  + 2.4mm  * var(--print-density) + var(--print-row-extra));
   --rhythm-summary-gap:  calc(1.2mm  + 1.6mm  * var(--print-density));
   --rhythm-totals-row:   calc(3.4mm  + 2.6mm  * var(--print-density));
@@ -110,7 +119,9 @@ html, body {
   flex-direction: column;
   background: var(--paper);
   color: var(--ink);
-  line-height: 1.5;
+  /* The metadata leading, matching the app. Item cells take the looser
+     --rhythm-cell-line below; everything else inherits this. */
+  line-height: var(--rhythm-field-line);
   margin: 0;
 }
 
@@ -122,12 +133,26 @@ html, body {
 .invoice-sheet h1, .invoice-sheet h2, .invoice-sheet p,
 .invoice-sheet span, .invoice-sheet dt, .invoice-sheet dd { margin: 0; }
 
+/*
+ * The bot renders through Browser Rendering, not a print dialog, so there is
+ * no Margins control to fight and the sheet is the full A4 page — none of the
+ * safe band the desktop app needs (see the geometry note in css/invoice.css).
+ *
+ * What DOES have to match is the content box inside it, or the same invoice
+ * comes out as two different documents depending on which half of the product
+ * issued it. The app draws a 277x190mm sheet with 2mm side padding, centred on
+ * A4 by a 10mm @page margin: a 273mm-wide content column inset 12mm from the
+ * paper's edge. These paddings reproduce exactly that box on a full-bleed
+ * page — 12mm horizontally, and 10mm plus the shared --rhythm-pad-block
+ * vertically, so the solver here is fitting the same height budget the app's
+ * solver is.
+ */
 .invoice-sheet.orientation-landscape {
   width: 297mm;
   height: 210mm;
-  padding: var(--rhythm-pad-block) 10mm;
+  padding: calc(10mm + var(--rhythm-pad-block)) 12mm;
   overflow: hidden;
-  font-size: calc(8.8pt * var(--doc-font-scale));
+  font-size: calc(8.7pt * var(--doc-font-scale));
 
   /* The app's own --col-* percentages (css/invoice.css), renormalized over
      the 97% they share there once its screen-only delete column is dropped:
@@ -205,7 +230,7 @@ html, body {
   justify-self: end;
   display: flex;
   flex-direction: column;
-  gap: 1mm;
+  gap: var(--rhythm-meta-gap);
   width: 68mm;
 }
 
@@ -216,7 +241,7 @@ html, body {
   gap: 2mm;
   background: var(--pay-fill);
   border-radius: 1.6mm;
-  padding: 0.8mm 2.5mm;
+  padding: var(--rhythm-meta-pad) 2.5mm;
 }
 
 .inv-meta dt {
@@ -308,7 +333,7 @@ html, body {
   min-width: 0;
   padding: 0 0 0.4mm;
   font-size: calc(9pt * var(--doc-font-scale));
-  line-height: 1.45;
+  line-height: var(--rhythm-field-line);
   font-weight: 700;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -373,6 +398,9 @@ html, body {
    this and stays taller — which is exactly what the fit solver measures. */
 .inv-table tbody tr { height: var(--rhythm-row-h); }
 .inv-table td.col-desc { min-height: var(--rhythm-cell-line); }
+/* Item cells keep their own, looser leading: a شرح that wraps needs it.
+   Mirrors .invoice-sheet .inv-table .cell-input in css/invoice.css. */
+.inv-table td { line-height: var(--rhythm-cell-line); }
 
 .row-index-badge {
   display: inline-flex;

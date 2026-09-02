@@ -188,7 +188,18 @@ body {
   --print-row-extra: 0mm;
   --print-block-extra: 0mm;
 
-  --rhythm-pad-block:    calc(4.6mm  + 2.4mm  * var(--print-density));
+  /*
+   * The sheet's own inner top/bottom padding. Its ceiling is unchanged at
+   * 7mm, so a short, airy invoice looks exactly as it did; only the floor
+   * moved, 4.6mm -> 2mm, and it moved for the same reason the horizontal
+   * padding dropped from 10mm to 2mm when the safe band was introduced: that
+   * padding existed to keep content off the paper's edge, and `@page margin`
+   * now holds the whole sheet 10mm inside the paper. Keeping both was paying
+   * twice for one job — and at sixteen landscape items the sheet needs those
+   * millimetres back, or the solver has to reach for the type-shrink axis on
+   * an ordinary invoice, which the design does not allow.
+   */
+  --rhythm-pad-block:    calc(2mm    + 5mm    * var(--print-density));
   --rhythm-head-pad:     calc(1.1mm  + 1.5mm  * var(--print-density));
   --rhythm-brand-gap:    calc(0.7mm  + 1.7mm  * var(--print-density));
   --rhythm-logo:         calc(11mm   + 6mm    * var(--print-density));
@@ -198,7 +209,18 @@ body {
   --rhythm-card-rowgap:  calc(0.15mm + 0.75mm * var(--print-density));
   --rhythm-th-pad:       calc(0.65mm + 0.75mm * var(--print-density));
   --rhythm-td-pad:       calc(0.28mm + 0.5mm  * var(--print-density));
-  --rhythm-cell-line:    calc(1.35em  + 0.2em   * var(--print-density));
+  --rhythm-cell-line:    calc(1.35em + 0.2em  * var(--print-density));
+  /*
+   * Leading for the metadata blocks — the header's date/number/validity strip
+   * and the two party cards. Unitless so it cascades as a factor to fields set
+   * at different sizes. These blocks are ~64mm of the sheet between them, all
+   * of it single lines of text sitting on the font's default 1.45 leading,
+   * and until now none of it was reachable by the solver: the rhythm could
+   * tighten the space BETWEEN the rows but not the rows themselves.
+   */
+  --rhythm-field-line:   calc(1.24   + 0.21   * var(--print-density));
+  --rhythm-meta-gap:     calc(0.5mm  + 0.5mm  * var(--print-density));
+  --rhythm-meta-pad:     calc(0.45mm + 0.35mm * var(--print-density));
   --rhythm-row-h:        calc(4.6mm  + 2.4mm  * var(--print-density) + var(--print-row-extra));
   --rhythm-summary-gap:  calc(1.2mm  + 1.6mm  * var(--print-density));
   --rhythm-totals-row:   calc(3.4mm  + 2.6mm  * var(--print-density));
@@ -244,13 +266,71 @@ body {
   margin: 0;
 }
 
-/* Landscape (default): 297mm x 210mm */
+/*
+ * ---------------------------------------------------------------------
+ * PRINTED SHEET GEOMETRY — the safe band
+ * ---------------------------------------------------------------------
+ *
+ * The sheet is NOT the paper. A4 landscape is 297x210mm; the sheet is
+ * 277x190mm, and the missing 10mm on every edge is deliberate slack.
+ *
+ * It exists because the print dialog moves the page box after the CSS has
+ * resolved, and a sheet sized edge-to-edge cannot survive that. Chrome's
+ * Margins control overrides `@page margin`, every physical printer has 4-5mm
+ * it cannot reach, and mm->device-px rounding differs between Chrome builds
+ * and print drivers. Sized edge-to-edge, any of those pushes the sheet past
+ * the page boundary — and a sheet one hairline over its page does not shrink,
+ * it paginates: the footer lands on page two, or the bottom is clipped and a
+ * strip of it reappears overleaf. That was the Windows 7 / Chrome 109 bug.
+ *
+ * The band is sized to the SMALLEST page box the dialog can hand back, not
+ * to the most likely one. Measured, on the paper:
+ *
+ *     Margins: None      page box 297x210  -> fits, centred by .print-slot
+ *     Margins: Minimum   page box 289x202  -> fits, centred by .print-slot
+ *     Margins: Default   page box 277x190  -> fits exactly
+ *
+ * A 5mm band was tried first, on the belief that .print-slot's `overflow:
+ * hidden` made the Default case merely ugly rather than lossy. It does not.
+ * Measured against a simulated 277x190 box, a 287x200 sheet lost 5mm off the
+ * top AND 5mm off the bottom — the footer band and part of the header — while
+ * ALSO reflowing 10mm narrower, because a flex item shrinks by default and a
+ * fixed-height one cannot shrink back. Clipping is silent: nothing warns, the
+ * page count does not change, and the loss is only visible on the paper. So
+ * the extra white margin is the cheaper half of the trade after all, and the
+ * dialog no longer has to be on any particular setting.
+ *
+ * `flex-shrink: 0` on .print-page (see @media print at the foot of this file)
+ * is the second half: it stops an exotic printer with an even smaller box
+ * from silently reflowing the design instead of overflowing visibly.
+ *
+ * The band costs less usable width than it looks. The sheet used to carry a
+ * 10mm inner padding to keep content off the paper edge; that has moved
+ * outward into `@page margin` (see setOrientation in app.js), so the inner
+ * padding is 2mm and the content column is 273mm against the 277mm it was
+ * before any of this.
+ *
+ * These two numbers are mirrored by PAGE_BOX_MM in app.js, which the rhythm
+ * solver measures against, and PAGE_SAFE_MARGIN_MM there must stay half the
+ * difference from the paper. Change them together or the solver will fit the
+ * sheet to a page that no longer exists.
+ */
+
+/* Landscape (default): sheet 277mm x 190mm on A4 297x210 paper */
 .invoice-sheet.orientation-landscape {
-  width: 297mm;
-  min-height: 210mm;
-  padding: var(--rhythm-pad-block) 10mm;
+  --page-w: 277mm;
+  --page-h: 190mm;
+  width: var(--page-w);
+  min-height: var(--page-h);
+  padding: var(--rhythm-pad-block) 2mm;
   font-size: calc(8.7pt * var(--doc-font-scale));
 
+  /* The six shares total 97%, not 100% — the remaining 3% is the screen-only
+     delete column. Keep that sum if you change them. Widening --col-desc at
+     the expense of --col-qty/--col-unit was tried when the safe band narrowed
+     the sheet (it is what the portrait block below does) and measured WORSE:
+     these descriptions do not wrap at either width, while the narrowed
+     numeric columns started to. Left as they are. */
   --col-row: 4%;
   --col-desc: 47%;
   --col-qty: 7%;
@@ -259,13 +339,27 @@ body {
   --col-total: 17%;
 }
 
-/* Portrait: 210mm x 297mm — proportions re-tuned, not a simple rotation */
+/* Portrait: sheet 190mm x 277mm on A4 210x297 paper — proportions re-tuned,
+   not a simple rotation. Same safe band as landscape, same reasoning. */
 .invoice-sheet.orientation-portrait {
-  width: 210mm;
-  min-height: 297mm;
-  padding: var(--rhythm-pad-block) 9mm;
+  --page-w: 190mm;
+  --page-h: 277mm;
+  width: var(--page-w);
+  min-height: var(--page-h);
+  padding: var(--rhythm-pad-block) 2mm;
   font-size: calc(9.2pt * var(--doc-font-scale));
 
+  /*
+   * Re-proportioned when the sheet narrowed to its safe band: the shares are
+   * of a 186mm content width now instead of 192mm, and holding --col-desc at
+   * 42.5% would have taken millimetres off the description column in absolute
+   * terms. That column is the one that decides whether a typical item wraps to
+   * a second line, and a wrap costs ~3mm on EVERY row at once — which the
+   * rhythm solver can only answer by shrinking the type. The widened share
+   * restores the column's real width; the two narrow numeric columns give it
+   * back, since a quantity and a unit are short strings that were carrying
+   * more width than they need.
+   */
   --col-row: 4.5%;
   --col-desc: 42.5%;
   --col-qty: 8%;
@@ -431,7 +525,7 @@ body {
   justify-self: end;
   display: flex;
   flex-direction: column;
-  gap: 1mm;
+  gap: var(--rhythm-meta-gap);
   width: 68mm;
 }
 
@@ -442,7 +536,7 @@ body {
   gap: 2mm;
   background: var(--pay-fill);
   border-radius: 1.6mm;
-  padding: 0.8mm 2.5mm;
+  padding: var(--rhythm-meta-pad) 2.5mm;
 }
 
 .inv-meta dt {
@@ -1290,10 +1384,11 @@ body {
 
   /*
    * Deliberately NOT overriding width/min-height here. The sheet must print
-   * at the exact same 297mm/210mm (or 210mm/297mm) box declared for screen —
-   * matching @page's size exactly — so the browser prints it at true 100%
-   * scale instead of fitting an "auto"-sized box into its own idea of the
-   * printable area.
+   * at the exact same box it is given on screen — 287x200mm, or 200x287mm in
+   * portrait — so the browser prints it at true 100% scale instead of fitting
+   * an "auto"-sized box into its own idea of the printable area. That box is
+   * deliberately smaller than the paper; see the safe-band note above
+   * .invoice-sheet.orientation-landscape for why.
    */
 
   /* Belt-and-suspenders: guarantee no leftover screen-preview scale factor
@@ -1571,6 +1666,25 @@ body,
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/*
+ * ...except the compact financial figures. pre-wrap/anywhere is there for
+ * prose — an address, the notes block — where a long line must wrap rather
+ * than run off the sheet. A quantity or a unit price is the opposite case:
+ * it has its own way of fitting a narrow column, which is fitNumericEl
+ * shrinking its font-size until the digits fit on ONE line, and that is what
+ * the editor shows. Left wrapping, a figure long enough to be shrunk on
+ * screen broke across two lines in the clone instead — same number, different
+ * row height, and a preview that disagreed with the paper.
+ *
+ * The computed totals beside them were never form controls, so they kept
+ * .cell-computed's nowrap all along; this puts the typed figures back on the
+ * same footing.
+ */
+.print-field-value.cell-input-num {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
 .print-page .no-print,
 .print-page .col-del { display: none !important; }
 
@@ -1589,6 +1703,55 @@ body,
 .print-page .cell-input { display: block; width: 100%; }
 .print-page .cell-textarea,
 .print-page .inv-autogrow { height: auto !important; min-height: 0; overflow: visible; }
+/*
+ * Releasing the textarea's fixed height (the line above) also releases the
+ * cell from --rhythm-cell-line, and what took over was the font's own default
+ * leading. That mattered more than it sounds: the sheet is mostly single
+ * lines of text, and every line box still sitting on that fixed default was
+ * height the solver could not reach — it could tighten the space BETWEEN the
+ * rows but not the rows themselves. On a sixteen-item landscape sheet that
+ * was the difference between fitting at full type size and only fitting by
+ * shrinking the type, which the design does not allow for ordinary invoices.
+ *
+ * So the line boxes join the rhythm too. The item cells keep their own,
+ * looser --rhythm-cell-line because a شرح that wraps needs the extra leading;
+ * everything else takes the base --rhythm-field-line below.
+ */
+.invoice-sheet .inv-table .cell-input,
+.invoice-sheet .inv-table .cell-computed {
+  line-height: var(--rhythm-cell-line);
+}
+
+/*
+ * These two blocks are BOTH scoped to .invoice-sheet rather than .print-page,
+ * and for the same reason: the editor is supposed to be a preview of the
+ * printed page, so any leading declared for one has to be declared for the
+ * other or the preview draws its rows at a height the paper will not use.
+ *
+ * The item-cell rule above used to be .print-page-only, which is exactly that
+ * failure: the editor's item cells fell through to --rhythm-field-line while
+ * the clone used the looser --rhythm-cell-line, and every row in the preview
+ * came out tighter than the row that printed. The gap below the table stayed
+ * within its tolerance the whole time, which is why no test caught it.
+ *
+ * Note what this does NOT buy. The two sheets still solve to different
+ * --print-density values — up to ~0.25 apart on a full landscape table — and
+ * always will: the editor carries a screen-only delete column and textareas
+ * pinned to grown pixel heights, so it hits the floor of the range earlier
+ * than the clone does. Density is the knob, not the output. What has to match
+ * is the geometry it produces, and with the leading shared that lands within
+ * about a third of a millimetre per row (see tests/print-fidelity.spec.mjs).
+ */
+.invoice-sheet,
+/* The field controls need naming explicitly: they carry `font: inherit`, and
+   what they end up inheriting is the UA's line-height rather than this one. */
+.invoice-sheet .inv-field-value,
+.invoice-sheet .inv-field-label,
+.invoice-sheet .inv-input,
+.invoice-sheet .inv-textarea,
+.invoice-sheet .print-field-value {
+  line-height: var(--rhythm-field-line);
+}
 .print-page .inv-footer-site-input { display: block; width: 100%; text-align: center; }
 
 /* The editor and every print clone share the same rhythm variables, so the
@@ -1649,8 +1812,17 @@ body,
 }
 .print-page > * { flex-shrink: 0; }
 .print-page .numeric-overflow { color: inherit !important; }
-.print-page.orientation-landscape { width: 297mm; height: 210mm; min-height: 210mm; }
-.print-page.orientation-portrait { width: 210mm; height: 297mm; min-height: 297mm; }
+/* Both orientations take their box from the --page-w/--page-h pair the
+   orientation class already declares, so the print clone can never disagree
+   with the sheet it was cloned from. */
+.print-page {
+  width: var(--page-w);
+  height: var(--page-h);
+  min-height: var(--page-h);
+  /* Centring on the paper is the slot's job, not the sheet's — see
+     .print-slot in the @media print block at the foot of this file. */
+  margin-inline: auto;
+}
 
 @media print {
   body.print-mode #app { display: none !important; }
@@ -1658,10 +1830,37 @@ body,
   body.print-mode .print-page {
     display: flex;
     margin: 0;
+    /*
+     * The sheet is a flex item inside .print-slot, and a flex item shrinks to
+     * fit its container by default. That default is wrong here in a way that
+     * is easy to miss: handed a page box narrower than the sheet, it does not
+     * scale the design down, it REFLOWS it — columns narrow, descriptions wrap
+     * onto extra lines, the content grows taller, and since the sheet's height
+     * is fixed the extra height is then clipped away by the slot. A design
+     * silently redrawn at the wrong proportions is worse than one that
+     * visibly overflows, so it is pinned. The safe band above is what makes
+     * this a theoretical case rather than the common one.
+     */
+    flex-shrink: 0;
+  }
+  /*
+   * 100vh in print media is the page box — the real one the dialog left
+   * behind, not the one the @page rule asked for — so the slot adapts to
+   * whatever margins the user picked and centres the sheet in it. That is the
+   * only mechanism here that can: a fixed margin would be right under one
+   * Margins setting and push the sheet off the page under another, and a
+   * block margin is dropped by the browser at a forced page break anyway.
+   */
+  body.print-mode .print-slot {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
     break-after: page;
     page-break-after: always;
   }
-  body.print-mode .print-page:last-child { break-after: auto; page-break-after: auto; }
+  body.print-mode .print-slot:last-child { break-after: auto; page-break-after: auto; }
 
   .invoice-sheet { --col-scale: 1.0309; }
   .inv-field-value.inv-input { background-image: none !important; }

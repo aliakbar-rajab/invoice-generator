@@ -9,6 +9,7 @@ import {
   sendDocument,
   inlineKeyboard,
   replyKeyboard,
+  escapeHtml,
 } from "../lib/telegram.js";
 import { COMPANIES, COMPANY_ORDER, getCompany, OTHER_COMPANY_KEY, buildCustomCompany } from "../lib/companies.js";
 import {
@@ -28,6 +29,11 @@ const MAX_HISTORY = 20;
 const MAX_ITEMS = 30;
 
 const WAIT_MESSAGE_TEXT = "⏳ در حال آماده‌سازی و ارسال پیش‌فاکتور، لطفاً منتظر بمانید…";
+
+// The seller's local zone. Every date the bot stamps on a sheet — and the
+// year its invoice counter is keyed by — is a date in this zone, never the
+// Worker's own UTC. See generateAndSendInvoice.
+const INVOICE_TIME_ZONE = "Asia/Tehran";
 
 // Sequential customer-detail fields asked after "تکمیل اطلاعات مشتری". Each
 // step can be skipped or short-circuited straight to item entry.
@@ -250,7 +256,7 @@ export class InvoiceSession extends DurableObject {
       return s;
     });
     await this.saveState(next);
-    await sendMessage(token, chatId, `✅ نام شرکت ثبت شد: ${name}`);
+    await sendMessage(token, chatId, `✅ نام شرکت ثبت شد: ${escapeHtml(name)}`);
     await sendMessage(token, chatId, "👤 نام مشتری (خریدار) را وارد کنید:", {
       reply_markup: backAndCancelKeyboard(),
     });
@@ -300,7 +306,10 @@ export class InvoiceSession extends DurableObject {
       await sendMessage(
         token,
         chatId,
-        "❗️مقدار واردشده معتبر نیست. یک عدد مثبت وارد کنید (مثال: ۱۰ یا ۲.۵):",
+        // Names the comma explicitly: "۲,۵" used to be accepted and silently
+        // read as ۲۵, so the one mistake this field is most likely to see is
+        // now the one the message calls out.
+        "❗️مقدار واردشده معتبر نیست. یک عدد مثبت با حداکثر سه رقم اعشار وارد کنید و برای اعشار از نقطه استفاده کنید، نه ویرگول (مثال: ۱۰ یا ۲.۵):",
         { reply_markup: backAndCancelKeyboard() }
       );
       return;
@@ -322,7 +331,7 @@ export class InvoiceSession extends DurableObject {
       await sendMessage(
         token,
         chatId,
-        "❗️مبلغ واردشده معتبر نیست. یک عدد مثبت وارد کنید (مثال: ۱۵۰۰۰۰۰):",
+        "❗️مبلغ واردشده معتبر نیست. مبلغ را به ریال و بدون اعشار وارد کنید (مثال: ۱۵۰۰۰۰۰):",
         { reply_markup: backAndCancelKeyboard() }
       );
       return;
@@ -359,7 +368,7 @@ export class InvoiceSession extends DurableObject {
       token,
       chatId,
       `✅ ردیف ${toPersianDigits(state.items.length)} ثبت شد:\n` +
-        `«${last.description}» — ${formatQtyMilli(BigInt(last.quantityMilli))} × ${formatBigRial(BigInt(last.unitPriceRial))} ریال`
+        `«${escapeHtml(last.description)}» — ${formatQtyMilli(BigInt(last.quantityMilli))} × ${formatBigRial(BigInt(last.unitPriceRial))} ریال`
     );
   }
 
@@ -636,6 +645,10 @@ export class InvoiceSession extends DurableObject {
     const waitMessage = await sendMessage(token, chatId, WAIT_MESSAGE_TEXT).catch(() => null);
     const waitMessageId = waitMessage?.message_id ?? null;
 
+    // The accounting number this attempt drew, so a failed render can hand it
+    // back instead of retiring it (see the catch below).
+    let reserved = null;
+
     await sendChatAction(token, chatId, "upload_document").catch(() => {});
     try {
       const company =
@@ -649,7 +662,13 @@ export class InvoiceSession extends DurableObject {
       ]);
 
       const now = new Date();
+      // Workers run as UTC, and Iran is UTC+03:30 — without an explicit zone
+      // every invoice issued between midnight and 03:30 Tehran carried the
+      // PREVIOUS day's date, and once a year at Nowruz was filed under the
+      // previous year's counter. The date on the sheet is the seller's local
+      // date, so it is asked for as such.
       const jalaliParts = new Intl.DateTimeFormat("fa-IR-u-ca-persian", {
+        timeZone: INVOICE_TIME_ZONE,
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
@@ -660,6 +679,7 @@ export class InvoiceSession extends DurableObject {
       const asciiYear = toAsciiDigits(jalaliYear);
       const counterStub = this.env.INVOICE_COUNTER.getByName("global");
       const seq = await counterStub.next(state.companyKey, asciiYear);
+      reserved = { companyKey: state.companyKey, yearKey: asciiYear, value: seq };
       const docNumber = `${jalaliYear}-${toPersianDigits(String(seq).padStart(3, "0"))}`;
 
       const items = state.items.map((it) => ({
@@ -697,6 +717,18 @@ export class InvoiceSession extends DurableObject {
       });
     } catch (err) {
       console.error("generateAndSendInvoice failed:", err);
+      // The number was drawn before the render, because it has to be printed
+      // ON the sheet. A render that never produced a sheet must not retire
+      // it: the user is sent straight back to "🖋 مهر" to retry, and every
+      // retry used to burn another number, leaving permanent gaps in a
+      // sequence that is meant to be gapless. release() is a no-op unless
+      // this attempt still holds the highest number, so a number that some
+      // other chat has already built on is never clawed back.
+      if (reserved) {
+        await this.env.INVOICE_COUNTER.getByName("global")
+          .release(reserved.companyKey, reserved.yearKey, reserved.value)
+          .catch(() => {});
+      }
       const retryState = this.advance(state, (s) => {
         s.step = "ask_stamp";
         return s;

@@ -11,6 +11,13 @@ export default defineConfig({
 	plugins: [
 		cloudflareTest({
 			wrangler: { configPath: "./wrangler.jsonc" },
+			// The webhook secret is a real secret in production (wrangler secret
+			// put TELEGRAM_WEBHOOK_SECRET) and therefore absent from
+			// wrangler.jsonc. The fetch handler fails closed without it, so the
+			// tests need a known value to send in the header.
+			miniflare: {
+				bindings: { TELEGRAM_WEBHOOK_SECRET: "test-webhook-secret" },
+			},
 		}),
 	],
 });

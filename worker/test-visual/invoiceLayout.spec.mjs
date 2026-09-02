@@ -73,7 +73,21 @@ async function measurePages(page) {
         closingGapMm: summary && table
           ? mm(summary.getBoundingClientRect().top - table.getBoundingClientRect().bottom)
           : null,
-        bottomGapMm: footer ? mm(box.bottom - footer.getBoundingClientRect().bottom) : null,
+        // Measured against the sheet's CONTENT edge, not the paper's. The
+        // sheet carries a deliberate inset now — the bot reproduces the same
+        // 273x190mm content box the desktop app prints, centred on a
+        // full-bleed A4 page (see .invoice-sheet.orientation-landscape in
+        // invoiceStyles.js) — and "the footer sits on the bottom edge" has
+        // always meant the bottom of the content, never the bottom of the
+        // paper. Subtracting the padding keeps the number meaning that,
+        // whatever inset the page happens to carry.
+        bottomGapMm: footer
+          ? mm(
+              box.bottom -
+                parseFloat(getComputedStyle(sheet).paddingBottom) -
+                footer.getBoundingClientRect().bottom
+            )
+          : null,
       };
     });
   });
@@ -165,4 +179,47 @@ test("rows that wrap onto extra lines move to the next sheet instead of being cl
       .querySelector(".inv-summary")
   );
   expect(lastHasClosing).toBe(true);
+});
+
+test("the bot's sheet reproduces the desktop app's printed content box", async ({ page }) => {
+  // The app and the bot are two front ends onto one document, and they had
+  // silently drifted: the app's sheet moved to a 273mm content column inset
+  // 12mm from the paper (see the safe-band note in css/invoice.css) while the
+  // bot kept rendering a 277mm column inset 10mm. Same invoice, two documents.
+  //
+  // The bot renders through Browser Rendering, so it has no print dialog to
+  // defend against and keeps the full A4 page — but the box drawn inside it
+  // has to be the one the app prints, to the millimetre.
+  const APP_CONTENT_WIDTH_MM = 273;
+  const APP_PAGE_INSET_MM = 12;
+
+  await page.setContent(sampleInvoiceHtml(7), { waitUntil: "load" });
+  await page.evaluate(() => document.fonts.ready);
+  await page.evaluate(layoutInvoicePages, { maxRowsPerPage: MAX_ROWS_PER_PAGE });
+
+  const box = await page.evaluate(() => {
+    const MM = 96 / 25.4;
+    const sheet = document.querySelector(".invoice-sheet");
+    const styles = getComputedStyle(sheet);
+    const rect = sheet.getBoundingClientRect();
+    const mm = (value) => Number((value / MM).toFixed(2));
+    return {
+      pageWidthMm: mm(rect.width),
+      pageHeightMm: mm(rect.height),
+      contentWidthMm: mm(rect.width) - mm(parseFloat(styles.paddingLeft)) - mm(parseFloat(styles.paddingRight)),
+      sideInsetMm: mm(parseFloat(styles.paddingLeft)),
+      fontSizePt: Number((parseFloat(styles.fontSize) / (96 / 72)).toFixed(2)),
+    };
+  });
+
+  // Full-bleed A4: no safe band here, because there is no dialog to survive.
+  expect(box.pageWidthMm, "the PDF page stays full A4").toBeCloseTo(297, 0);
+  expect(box.pageHeightMm, "the PDF page stays full A4").toBeCloseTo(210, 0);
+
+  expect(box.contentWidthMm, "content column must match the app's").toBeCloseTo(APP_CONTENT_WIDTH_MM, 0);
+  expect(box.sideInsetMm, "content must start where the app's does").toBeCloseTo(APP_PAGE_INSET_MM, 0);
+  // The base type size is the other half of "same document": 8.7pt, matching
+  // .invoice-sheet.orientation-landscape in css/invoice.css. It had drifted to
+  // 8.8pt here.
+  expect(box.fontSizePt, "base type size must match the app's").toBeCloseTo(8.7, 1);
 });

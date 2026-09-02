@@ -27,13 +27,45 @@ export function toPersianDigits(value) {
 const GROUP_SEP = "٬"; // Arabic thousands separator (matches fa-IR grouping)
 const DECIMAL_SEP = "٫"; // Arabic decimal separator (matches fa-IR decimal point)
 
-// Normalizes a user-typed numeric string to ASCII digits with a plain "."
-// decimal point and no grouping separators.
-export function normalizeNumericInput(value) {
-  if (value === null || value === undefined) return "";
-  return toAsciiDigits(String(value))
-    .replace(/[,\s٬]/g, "")
-    .replace(/٫/g, ".");
+// An integer part is either bare digits, or 1-3 digits followed by complete
+// 3-digit groups joined by ONE consistent separator — "1000", "1,000",
+// "1٬000٬000", "1 000 000". Anything else that merely contains a separator
+// is not a grouped number.
+const STRICT_UNGROUPED_INT = /^\d+$/;
+const STRICT_GROUPED_INT = /^\d{1,3}(?:([,٬\s])\d{3})(?:\1\d{3})*$/;
+
+// Normalizes a user-typed numeric string to plain ASCII digits with a "."
+// decimal point, or returns null when the text is not a well-formed number.
+//
+// Grouping separators are stripped only after the grouping they claim to
+// express has been verified. Stripping "," / "٬" / spaces unconditionally
+// (as this did) turned "2,5" into 25 — and a comma is exactly what many
+// keyboards and locales produce for a DECIMAL point, so a quantity typed the
+// European way was silently multiplied by ten with no warning at all. What
+// the bot itself prints ("۱٬۵۰۰٬۰۰۰", "۲٫۵") still round-trips unchanged.
+//
+// This mirrors normalizeStrictNumber in the desktop app (js/app.js), where
+// the same bug was found and fixed first; the bot never got that fix, so the
+// two halves of the same product disagreed about what "2,5" meant.
+//
+// "" means genuinely empty; null means malformed. Callers must keep those
+// apart wherever an empty value has a legitimate meaning of its own.
+export function normalizeStrictNumber(value) {
+  let raw = toAsciiDigits(String(value == null ? "" : value)).trim().replace(/٫/g, ".");
+  if (!raw) return "";
+  let sign = "";
+  if (raw.charAt(0) === "-") {
+    sign = "-";
+    raw = raw.slice(1);
+  }
+  const pieces = raw.split(".");
+  if (pieces.length > 2) return null;
+  const intPart = pieces[0];
+  const fracPart = pieces.length > 1 ? pieces[1] : null;
+  if (!STRICT_UNGROUPED_INT.test(intPart) && !STRICT_GROUPED_INT.test(intPart)) return null;
+  // Grouping inside the fractional part is never meaningful ("1.0,5").
+  if (fracPart !== null && !/^\d*$/.test(fracPart)) return null;
+  return sign + intPart.replace(/[,٬\s]/g, "") + (fracPart === null ? "" : "." + fracPart);
 }
 
 // Parses a numeric string into a BigInt scaled by 10^decimals (e.g.
@@ -41,7 +73,8 @@ export function normalizeNumericInput(value) {
 // beyond that precision. Returns null when the input isn't a valid number
 // (as opposed to 0n for a genuinely empty/zero input).
 export function parseDecimalToBigIntScaled(value, decimals) {
-  const normalized = normalizeNumericInput(value).replace(/[^0-9.\-]/g, "");
+  const normalized = normalizeStrictNumber(value);
+  if (normalized === null) return null;
   const match = normalized.match(/^(-?)(\d*)(?:\.(\d*))?$/);
   if (!match || (!match[2] && !match[3])) return null;
 
@@ -87,8 +120,13 @@ function groupDigits(digitsAscii, sep) {
 
 // ---------- Money (integer Rial, no fractional subunit) ----------
 
+// Rial has no fractional subunit, so an amount carrying a decimal point is
+// not a Rial amount — rejected outright rather than quietly rounded, which
+// is the rule strictMoney already applies in the desktop app.
 export function parseMoneyBig(value) {
-  return parseDecimalToBigIntScaled(value, 0);
+  const normalized = normalizeStrictNumber(value);
+  if (!normalized || !/^\d+$/.test(normalized)) return null;
+  return parseDecimalToBigIntScaled(normalized, 0);
 }
 
 export function formatBigRial(value) {
@@ -100,8 +138,13 @@ export function formatBigRial(value) {
 
 // ---------- Quantity (up to 3 decimal places, e.g. weight in tons) ----------
 
+// Three decimal places is the precision the printed invoice can actually
+// show, so a fourth is rejected rather than rounded away behind the user's
+// back — same rule as strictQuantity in the desktop app.
 export function parseQtyMilli(value) {
-  return parseDecimalToBigIntScaled(value, 3);
+  const normalized = normalizeStrictNumber(value);
+  if (!normalized || !/^\d+(?:\.\d{1,3})?$/.test(normalized)) return null;
+  return parseDecimalToBigIntScaled(normalized, 3);
 }
 
 export function formatQtyMilli(value) {

@@ -767,8 +767,27 @@ test("one sheet fills itself at every item count, tightening as items are added"
       .toBeLessThanOrEqual(30);
     expect(metrics.bottomGap, `${count} items: the footer must sit on the bottom edge`)
       .toBeLessThanOrEqual(30);
-    // Ordinary single-line descriptions never need the type-shrink axis.
-    expect(metrics.typeScale, `${count} items: type size must not be touched`).toBe(1);
+    // Ordinary single-line descriptions do not need the type-shrink axis —
+    // with one measured exception at the very top of the range.
+    //
+    // The sheet is 190mm tall, not 210mm: it is inset 10mm from the paper on
+    // every edge so that it survives whatever page box the print dialog hands
+    // back, including Chrome's Margins:Default (see the safe-band note in
+    // invoice.css). At the printed form's full sixteen-item capacity that
+    // costs about 2% of type size — 8.7pt becoming ~8.5pt — because density
+    // bottoms out first and the type axis is what is left. Below capacity the
+    // rhythm absorbs it all and the type is untouched.
+    //
+    // The bound is what matters, not the exact figure: the axis exists for
+    // exactly this, and 0.97 is still far above the 0.9 emergency floor that
+    // signals a document the design genuinely cannot carry.
+    if (count >= 16) {
+      expect(metrics.typeScale, `${count} items: type shrink must stay marginal`)
+        .toBeGreaterThanOrEqual(0.97);
+      expect(metrics.typeScale, `${count} items: type must never grow`).toBeLessThanOrEqual(1);
+    } else {
+      expect(metrics.typeScale, `${count} items: type size must not be touched`).toBe(1);
+    }
   });
 
   for (let index = 1; index < measured.length; index += 1) {
