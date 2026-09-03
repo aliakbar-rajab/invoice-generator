@@ -103,7 +103,7 @@ function itemRow(index, line) {
 // row-template's own computed cells default to "۰", not blank). Purely
 // visual: never fed into computeTotals, so it can't affect any amount.
 function blankItemRow(index) {
-  return `<tr>
+  return `<tr class="is-blank-row">
     <td class="col-row"><span class="row-index-badge">${toPersianDigits(index)}</span></td>
     <td class="col-desc"></td>
     <td class="col-qty"></td>
@@ -233,7 +233,7 @@ export function buildInvoiceHtml(data) {
   const closingBlock = `<section class="inv-summary">
     <div class="inv-totals">
       <div><span>جمع کل</span><strong>${formatBigRial(grossTotal)} ریال</strong></div>
-      <div><span>مالیات و عوارض (٪${toPersianDigits(String(taxPercent)).replace(/\./g, "٫")})</span><strong>${formatBigRial(taxTotal)} ریال</strong></div>
+      <div><span>مالیات و عوارض (٪${escapeHtml(toPersianDigits(String(taxPercent)).replace(/\./g, "٫"))})</span><strong>${formatBigRial(taxTotal)} ریال</strong></div>
       <div class="inv-total-final"><span>مبلغ قابل پرداخت</span><strong>${formatBigRial(netTotal)} ریال</strong></div>
     </div>
     <section class="inv-amount-words">

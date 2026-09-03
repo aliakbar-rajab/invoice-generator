@@ -177,6 +177,20 @@ export function layoutInvoicePages(options) {
   }
 
   // ---- 1. Relief ---------------------------------------------------------
+  // Blank filler rows belong to a single-sheet invoice only. If the single
+  // page overflows or the document already spans multiple sheets, remove any
+  // blank starter rows so dummy lines are never pushed onto continuation pages.
+  const initialSheets = pages();
+  if (initialSheets.length === 1) {
+    const firstPage = initialSheets[0];
+    const firstCount = rowsOf(firstPage).length;
+    if (firstCount > MAX_ROWS || !fitPage(firstPage, firstCount, true)) {
+      document.querySelectorAll(".is-blank-row").forEach(function (r) { r.remove(); });
+    }
+  } else {
+    document.querySelectorAll(".is-blank-row").forEach(function (r) { r.remove(); });
+  }
+
   // Walk forward; whatever will not fit on a page is handed to the next one,
   // which the following iteration then re-checks in the same way.
   for (let index = 0; index < pages().length; index += 1) {

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   toPersianDigits,
   toAsciiDigits,
+  normalizeStrictNumber,
   parseQtyMilli,
   parseMoneyBig,
   formatBigRial,
@@ -9,6 +10,7 @@ import {
   bigRoundDiv,
   rialToWordsBig,
 } from "../src/lib/persianNumbers.js";
+import { escapeHtml } from "../src/lib/telegram.js";
 
 describe("digit conversion", () => {
   it("converts ASCII digits to Persian", () => {
@@ -88,3 +90,24 @@ describe("rialToWordsBig", () => {
     expect(rialToWordsBig(1500000n)).toBe("یک میلیون و پانصد هزار ریال");
   });
 });
+
+describe("normalizeStrictNumber (lone dot and fraction edge cases)", () => {
+  it("rejects a lone dot or Persian momayyez", () => {
+    expect(normalizeStrictNumber(".")).toBeNull();
+    expect(normalizeStrictNumber("٫")).toBeNull();
+  });
+
+  it("parses leading decimal properly", () => {
+    expect(normalizeStrictNumber(".5")).toBe("0.5");
+    expect(normalizeStrictNumber("٫۵")).toBe("0.5");
+  });
+});
+
+describe("escapeHtml (attribute safety)", () => {
+  it("escapes quotes as well as <>&", () => {
+    expect(escapeHtml('<div class="test" data-note=\'note\'>')).toBe(
+      "&lt;div class=&quot;test&quot; data-note=&#39;note&#39;&gt;"
+    );
+  });
+});
+

@@ -59,7 +59,7 @@ function afterCustomerDetailStep(step) {
   return CUSTOMER_DETAIL_FIELDS[idx + 1]?.step ?? "item_description";
 }
 
-function freshState() {
+function freshState(taxPercent = 10) {
   return {
     step: "idle",
     companyKey: null,
@@ -71,7 +71,7 @@ function freshState() {
     buyerPhone: null,
     items: [],
     currentItem: {},
-    taxPercent: 10,
+    taxPercent: typeof taxPercent === "number" && !Number.isNaN(taxPercent) ? taxPercent : 10,
     includeStamp: null,
     history: [],
   };
@@ -164,7 +164,7 @@ export class InvoiceSession extends DurableObject {
     let state = await this.loadState();
 
     if (text === "/start") {
-      state = freshState();
+      state = freshState(state?.taxPercent);
       await this.saveState(state);
       await sendMessage(
         token,
@@ -176,13 +176,13 @@ export class InvoiceSession extends DurableObject {
     }
 
     if (text === "/cancel" || text === "❌ لغو") {
-      await this.saveState(freshState());
+      await this.saveState(freshState(state?.taxPercent));
       await sendMessage(token, chatId, "عملیات لغو شد.", { reply_markup: MAIN_MENU });
       return;
     }
 
     if (text === "/new" || text === "➕ فاکتور جدید") {
-      state = this.advance(freshState(), (s) => {
+      state = this.advance(freshState(state?.taxPercent), (s) => {
         s.step = "choose_company";
         return s;
       });
@@ -195,8 +195,9 @@ export class InvoiceSession extends DurableObject {
       const parts = text.split(/\s+/);
       if (parts.length > 1) {
         const rateStr = toAsciiDigits(parts[1]).trim().replace(/٫/g, ".");
+        const validRate = /^\d+(?:\.\d{1,2})?$/.test(rateStr);
         const num = parseFloat(rateStr);
-        if (!Number.isNaN(num) && Number.isFinite(num) && num >= 0 && num <= 100) {
+        if (validRate && !Number.isNaN(num) && Number.isFinite(num) && num >= 0 && num <= 100) {
           state = this.advance(state, (s) => {
             s.taxPercent = num;
             return s;
@@ -212,7 +213,7 @@ export class InvoiceSession extends DurableObject {
           await sendMessage(
             token,
             chatId,
-            "❗️درصد مالیات باید عددی بین ۰ تا ۱۰۰ باشد (مثال: /tax 10 یا /tax 0 یا /tax 9.5)."
+            "❗️درصد مالیات باید عددی بین ۰ تا ۱۰۰ و حداکثر با دو رقم اعشار باشد (مثال: /tax 10 یا /tax 0 یا /tax 9.5)."
           );
           return;
         }
@@ -430,7 +431,7 @@ export class InvoiceSession extends DurableObject {
     await editMessageReplyMarkup(token, chatId, messageId, { inline_keyboard: [] }).catch(() => {});
 
     if (data === "cancel") {
-      await this.saveState(freshState());
+      await this.saveState(freshState(state?.taxPercent));
       await sendMessage(token, chatId, "عملیات لغو شد.", { reply_markup: MAIN_MENU });
       return;
     }
@@ -776,7 +777,7 @@ export class InvoiceSession extends DurableObject {
       const filename = `invoice-${companySlug}-${asciiYear}-${String(seq).padStart(3, "0")}.pdf`;
 
       await sendDocument(token, chatId, pdfBytes, filename, "🎉 پیش‌فاکتور شما آماده است.");
-      await this.saveState(freshState());
+      await this.saveState(freshState(state?.taxPercent));
       if (waitMessageId) {
         await deleteMessage(token, chatId, waitMessageId).catch(() => {});
       }

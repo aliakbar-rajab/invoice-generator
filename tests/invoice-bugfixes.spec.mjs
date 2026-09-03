@@ -820,4 +820,95 @@ test("an older backup without taxPercent defaults to 0% tax, not imposing 10%", 
   await expect(page.locator('[data-total="netTotal"]')).toHaveText("۱٬۰۰۰٬۰۰۰ ریال");
 });
 
+test("natural unpadded Jalali dates (۱۴۰۴/۶/۱ or 1404/6/1) parse without error and format with zero padding on blur", async ({ page }) => {
+  await openApp(page);
+  const dateInput = page.locator('[data-field="meta.date"]');
+  await dateInput.fill("1404/6/1");
+  await dateInput.press("Tab");
+  await expect(dateInput).toHaveValue("۱۴۰۴/۰۶/۰۱");
+  const warnings = await warningTexts(page);
+  expect(warnings.some((w) => w.includes("یک تاریخ معتبر شمسی نیست"))).toBe(false);
+});
+
+test("a single-row invoice whose description is taller than an A4 page is blamed on row 1, not closing block", async ({ page }) => {
+  await openApp(page);
+  await fillValidFirstRow(page, "1000000");
+  await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار آزمایشی");
+
+  // Delete all remaining blank rows (rows 2 through 7) so only row 1 exists
+  const rows = page.locator("#inv-rows tr");
+  while ((await rows.count()) > 1) {
+    await rows.nth(1).locator(".row-delete").click();
+  }
+  await expect(rows).toHaveCount(1);
+
+  // Fill row 1 with massive text exceeding an entire A4 page
+  await cell(page, 1, "description").fill("شرح بسیار بلند که در صفحه جا نمی‌شود ".repeat(400));
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+
+  const warnings = await warningTexts(page);
+  expect(warnings.some((w) => w.includes("ردیف ۱ بلندتر از ظرفیت یک صفحهٔ A4 است"))).toBe(true);
+  expect(warnings.some((w) => w.includes("بخش پایانی سند"))).toBe(false);
+});
+
+test("Shift+Enter in description textarea inserts a newline rather than advancing to the next row", async ({ page }) => {
+  await openApp(page);
+  const desc = cell(page, 1, "description");
+  await desc.fill("خط اول");
+  await desc.press("Shift+Enter");
+  await desc.type("خط دوم");
+  await expect(desc).toHaveValue("خط اول\nخط دوم");
+  await expect(desc).toBeFocused();
+});
+
+test("closing saved-panel and settings-panel restores focus to their trigger buttons", async ({ page }) => {
+  await openApp(page);
+
+  // Saved panel
+  const savedBtn = page.locator("#btn-saved-list");
+  await savedBtn.click();
+  await expect(page.locator("#saved-panel")).toBeVisible();
+  const closeBtn = page.locator("#btn-saved-close");
+  await closeBtn.focus();
+  await closeBtn.click();
+  await expect(page.locator("#saved-panel")).toBeHidden();
+  await expect(savedBtn).toBeFocused();
+
+  // Settings panel
+  const settingsBtn = page.locator("#btn-settings");
+  await settingsBtn.click();
+  await expect(page.locator("#settings-panel")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#settings-panel")).toBeHidden();
+  await expect(settingsBtn).toBeFocused();
+});
+
+test("company editor allows removing an uploaded logo and stamp", async ({ page }) => {
+  await openApp(page);
+  await page.locator("#btn-settings").click();
+  await page.locator("#btn-company-editor").click();
+  await expect(page.locator("#company-editor-dialog")).toBeVisible();
+
+  // Pick a logo
+  const logoInput = page.locator("#company-logo-file");
+  const logoBuffer = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+    "base64"
+  );
+  await logoInput.setInputFiles({
+    name: "test-logo.png",
+    mimeType: "image/png",
+    buffer: logoBuffer,
+  });
+  await expect(page.locator("#btn-company-logo-remove")).toBeVisible();
+
+  // Remove the logo
+  await page.locator("#btn-company-logo-remove").click();
+  await expect(page.locator("#btn-company-logo-remove")).toBeHidden();
+  await expect(page.locator("#company-logo-empty")).toBeVisible();
+
+  await page.locator("#btn-company-editor-cancel").click();
+});
+
+
 

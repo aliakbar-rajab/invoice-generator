@@ -138,7 +138,9 @@ function groupDigits(digitsAscii, sep) {
 // ---------- Money (integer Rial, no fractional subunit) ----------
 
 function parseMoneyBig(value) {
-  return parseDecimalToBigIntScaled(value, 0);
+  var normalized = normalizeStrictNumber(value);
+  if (!normalized || !/^\d+$/.test(normalized)) return null;
+  return parseDecimalToBigIntScaled(normalized, 0);
 }
 
 function formatBigRial(value) {

@@ -246,10 +246,12 @@
   var companyLogoPreviewEl = document.getElementById("company-logo-preview");
   var companyLogoEmptyEl = document.getElementById("company-logo-empty");
   var companyLogoStatusEl = document.getElementById("company-logo-status");
+  var companyLogoRemoveBtn = document.getElementById("btn-company-logo-remove");
   var companyStampFileEl = document.getElementById("company-stamp-file");
   var companyStampPreviewEl = document.getElementById("company-stamp-preview");
   var companyStampEmptyEl = document.getElementById("company-stamp-empty");
   var companyStampStatusEl = document.getElementById("company-stamp-status");
+  var companyStampRemoveBtn = document.getElementById("btn-company-stamp-remove");
   var companyEditorErrorEl = document.getElementById("company-editor-error");
 
   // A failed image load (e.g. a profile added without its stamp file yet)
@@ -731,7 +733,8 @@
         month: "2-digit",
         day: "2-digit",
       }).format(new Date());
-      return !!invoiceDateDigits(today);
+      var bare = toAsciiDigits(today).replace(/[^0-9]/g, "");
+      return bare.length === 8 && !!invoiceDateDigits(today);
     } catch (err) {
       return false;
     }
@@ -981,8 +984,11 @@
   // number. The per-company counter advances only when the document is first
   // saved or intentionally printed/finalized (commitInvoiceNumber below).
   function invoiceDateDigits(value) {
-    var digits = toAsciiDigits(value || "").replace(/[^0-9]/g, "");
-    return /^\d{8}$/.test(digits) ? digits : "";
+    var ascii = toAsciiDigits(value || "").trim();
+    var match = ascii.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/) || ascii.match(/^(\d{4})(\d{2})(\d{2})$/);
+    if (!match) return "";
+    var pad2 = function (n) { return (n.length < 2 ? "0" : "") + n; };
+    return match[1] + pad2(match[2]) + pad2(match[3]);
   }
 
   function currentInvoiceDateValue() {
@@ -1255,11 +1261,13 @@
       companyLogoPreviewEl.hidden = false;
       companyLogoEmptyEl.hidden = true;
       companyLogoStatusEl.textContent = label || "لوگو آمادهٔ ثبت است.";
+      if (companyLogoRemoveBtn) companyLogoRemoveBtn.hidden = false;
     } else {
       companyLogoPreviewEl.hidden = true;
       companyLogoPreviewEl.removeAttribute("src");
       companyLogoEmptyEl.hidden = false;
       companyLogoStatusEl.textContent = "PNG، JPG، WebP یا SVG";
+      if (companyLogoRemoveBtn) companyLogoRemoveBtn.hidden = true;
     }
   }
 
@@ -1272,6 +1280,7 @@
       }
       if (companyStampEmptyEl) companyStampEmptyEl.hidden = true;
       if (companyStampStatusEl) companyStampStatusEl.textContent = label || "مهر آمادهٔ ثبت است.";
+      if (companyStampRemoveBtn) companyStampRemoveBtn.hidden = false;
     } else {
       if (companyStampPreviewEl) {
         companyStampPreviewEl.hidden = true;
@@ -1279,6 +1288,7 @@
       }
       if (companyStampEmptyEl) companyStampEmptyEl.hidden = false;
       if (companyStampStatusEl) companyStampStatusEl.textContent = "PNG، JPG، WebP یا SVG";
+      if (companyStampRemoveBtn) companyStampRemoveBtn.hidden = true;
     }
   }
 
@@ -1423,11 +1433,8 @@
     var previousProfile = editingExisting ? Object.assign({}, COMPANY_PROFILES[profileKey]) : null;
     var profile = profileFromCompanyData({
       name: name,
-      // The editor has no "remove logo" control, so an empty pending logo can
-      // only mean "the user did not pick a new one" — never "delete the one
-      // this company already has".
-      logo: pendingCompanyLogoData || (editingExisting ? previousProfile.logo : ""),
-      stamp: pendingCompanyStampData || (editingExisting ? previousProfile.stamp : ""),
+      logo: pendingCompanyLogoData || "",
+      stamp: pendingCompanyStampData || "",
       nationalId: toPersianDigits(companyEditorNationalIdEl.value.trim()),
       address: companyEditorAddressEl.value.trim(),
       postalCode: toPersianDigits(companyEditorPostalCodeEl.value.trim()),
@@ -1705,7 +1712,7 @@
   // ---------- Row rendering ----------
 
   function handleCellKeydown(e) {
-    if (e.key !== "Enter") return;
+    if (e.key !== "Enter" || e.shiftKey) return;
     e.preventDefault();
     var field = this.getAttribute("data-row-field");
     var tr = this.closest("tr");
@@ -2179,12 +2186,20 @@
         }
         el.addEventListener("blur", function () {
           if (field === "company.website") return;
-          if (el.isContentEditable) el.textContent = toPersianDigits(el.textContent);
-          else el.value = toPersianDigits(el.value);
           if (field === "meta.date") {
+            var parsedDate = readInvoiceDate(el.value);
+            if (parsedDate.kind === "valid") {
+              el.value = formatJalaliYmd(parsedDate.parts.y, parsedDate.parts.m, parsedDate.parts.d);
+            } else {
+              el.value = toPersianDigits(el.value);
+            }
             dateIsAutoSuggested = false;
             if (numberIsAutoSuggested) refreshLiveInvoiceNumber();
             refreshValidityFromDate();
+          } else if (el.isContentEditable) {
+            el.textContent = toPersianDigits(el.textContent);
+          } else {
+            el.value = toPersianDigits(el.value);
           }
           if (field === "meta.validity") validityIsAutoSuggested = false;
           recalcAll({ skipStaticFit: false });
@@ -2760,15 +2775,24 @@
     setStatus("«" + entry.name + "» حذف شد.");
   }
 
+  var savedPanelPreviousFocus = null;
+
   function openSavedPanel() {
+    savedPanelPreviousFocus = document.activeElement;
     renderSavedList();
     savedPanelEl.hidden = false;
     document.getElementById("btn-saved-list").setAttribute("aria-expanded", "true");
   }
 
   function closeSavedPanel() {
+    var shouldRestoreFocus = savedPanelEl.contains(document.activeElement);
     savedPanelEl.hidden = true;
-    document.getElementById("btn-saved-list").setAttribute("aria-expanded", "false");
+    var btn = document.getElementById("btn-saved-list");
+    btn.setAttribute("aria-expanded", "false");
+    if (shouldRestoreFocus) {
+      try { (savedPanelPreviousFocus || btn).focus(); } catch (err) {}
+    }
+    savedPanelPreviousFocus = null;
   }
 
   function toggleSavedPanel() {
@@ -3342,11 +3366,23 @@
       totalPages: 2,
       maxRows: MAX_PRINT_ITEM_ROWS_PER_PAGE,
     });
-    // Not even a single item row fits alongside the closing block (notes +
-    // amount-in-words + totals + signatures + footer), so nothing here is
-    // the fault of any particular row — deliberately no overflowRowIndex,
-    // since the last row's index would be an arbitrary scapegoat.
     if (rows.length && finalCount === 0) {
+      // If the row cannot fit on an A4 sheet even by itself (without the closing block),
+      // it is a row overflow, not a closing-block overflow.
+      var singleRowFits = pageFits(clonePrintPage([rows[rows.length - 1]], {
+        orientation: orientation,
+        density: 0,
+        continuation: true,
+        finalPage: false,
+      }));
+      if (!singleRowFits) {
+        return {
+          chunks: [],
+          orientation: orientation,
+          overflowRowIndex: rows.length - 1,
+          overflowKind: "row",
+        };
+      }
       return {
         chunks: [],
         orientation: orientation,
@@ -3565,6 +3601,18 @@
     return true;
   }
 
+  window.addEventListener("beforeprint", function () {
+    if (document.body.classList.contains("print-mode")) return;
+    refreshAutomaticTemporalFields(true);
+    recalcAll();
+    autoGrowTextareas();
+    var orientation = currentOrientation();
+    var plan = buildPrintPlan(printableSourceRows(), orientation);
+    if (!plan.overflowKind) {
+      var realized = realizePrintPlan(plan);
+      if (realized.pages) renderPrintPlan(realized.pages);
+    }
+  });
   window.addEventListener("afterprint", cleanupPrintDocument);
 
   // ---------- Wire up toolbar ----------
@@ -3574,15 +3622,27 @@
     return !!((buyer && buyer.value.trim()) || actualSourceRows().length);
   }
 
+  var settingsPanelPreviousFocus = null;
+
   function closeSettingsPanel() {
+    var shouldRestoreFocus = settingsPanelEl.contains(document.activeElement);
     settingsPanelEl.hidden = true;
     settingsBtnEl.setAttribute("aria-expanded", "false");
+    if (shouldRestoreFocus) {
+      try { (settingsPanelPreviousFocus || settingsBtnEl).focus(); } catch (err) {}
+    }
+    settingsPanelPreviousFocus = null;
   }
 
   function toggleSettingsPanel() {
-    settingsPanelEl.hidden = !settingsPanelEl.hidden;
-    settingsBtnEl.setAttribute("aria-expanded", settingsPanelEl.hidden ? "false" : "true");
-    if (!settingsPanelEl.hidden) closeSavedPanel();
+    if (settingsPanelEl.hidden) {
+      settingsPanelPreviousFocus = document.activeElement;
+      settingsPanelEl.hidden = false;
+      settingsBtnEl.setAttribute("aria-expanded", "true");
+      closeSavedPanel();
+    } else {
+      closeSettingsPanel();
+    }
   }
 
   async function applyTemporaryLogoFile(file) {
@@ -3893,6 +3953,17 @@
           companyEditorErrorEl.textContent = err.message || "افزودن مهر ممکن نشد.";
           companyEditorErrorEl.hidden = false;
         }
+      });
+    }
+
+    if (companyLogoRemoveBtn) {
+      companyLogoRemoveBtn.addEventListener("click", function () {
+        setCompanyLogoPreview("", "");
+      });
+    }
+    if (companyStampRemoveBtn) {
+      companyStampRemoveBtn.addEventListener("click", function () {
+        setCompanyStampPreview("", "");
       });
     }
 

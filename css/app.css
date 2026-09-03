@@ -2,6 +2,8 @@
    toolbar; the settings popover is reserved for occasional profile/asset
    maintenance. None of this file is part of printed output. */
 
+[hidden] { display: none !important; }
+
 .toolbar {
   position: sticky;
   top: 0;
@@ -639,6 +641,9 @@
 .company-logo-copy small { overflow: hidden; color: #74767c; font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
 .company-editor-error { margin-top: 10px !important; color: #9b2832 !important; }
 
+.settings-action.danger { border-color: #d99ba1; background: #fff0f1; color: #992631; }
+.settings-action.danger:hover { background: #ffe3e5; border-color: #d3838a; }
+
 @media screen and (max-width: 640px) {
   .company-editor-grid { grid-template-columns: 1fr; }
   .company-editor-field-wide { grid-column: auto; }
@@ -656,7 +661,8 @@
   .toolbar { padding-inline: 10px; }
   .toolbar-brand { display: none; }
   .toolbar-company-control { flex: 1 1 190px; }
-  .toolbar-document-block { display: none; }
+  .toolbar-document-block { flex: 1 1 100%; order: 10; margin-top: 4px; padding-inline: 0; border-inline-start: none; }
+  .toolbar-document-title-line { display: none; }
   .toolbar-live-total { min-width: 120px; flex: 1 1 120px; }
   .toolbar-quickbar { align-items: stretch; }
   .toolbar-actions { width: 100%; }

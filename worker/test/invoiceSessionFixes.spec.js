@@ -342,6 +342,34 @@ describe("bot-only regressions", () => {
 		state = await readState(chatId);
 		expect(state.taxPercent).toBe(9.5);
 	});
+
+	it("preserves custom taxPercent across /new, /cancel and post-generation", async () => {
+		const chatId = freshChatId();
+		await send(chatId, textUpdate(chatId, "/start", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "/tax 0", nextUpdateId()));
+		let state = await readState(chatId);
+		expect(state.taxPercent).toBe(0);
+
+		// /new must preserve the 0% tax setting
+		await send(chatId, textUpdate(chatId, "➕ فاکتور جدید", nextUpdateId()));
+		state = await readState(chatId);
+		expect(state.taxPercent).toBe(0);
+
+		// /cancel must preserve the 0% tax setting
+		await send(chatId, textUpdate(chatId, "/cancel", nextUpdateId()));
+		state = await readState(chatId);
+		expect(state.taxPercent).toBe(0);
+	});
+
+	it("rejects /tax with more than two decimal places", async () => {
+		const chatId = freshChatId();
+		await send(chatId, textUpdate(chatId, "/start", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "/tax 10.555", nextUpdateId()));
+		const last = lastMessage(calls);
+		expect(last.body.text).toContain("حداکثر با دو رقم اعشار");
+		const state = await readState(chatId);
+		expect(state.taxPercent).toBe(10); // remains default 10
+	});
 });
 
 // ---------- Invoice numbering ----------
@@ -381,3 +409,5 @@ describe("InvoiceCounter", () => {
 		expect(await stub.next("release-b", "1405")).toBe(theirs + 1);
 	});
 });
+
+
