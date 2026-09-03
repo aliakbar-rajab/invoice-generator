@@ -191,6 +191,41 @@ export class InvoiceSession extends DurableObject {
       return;
     }
 
+    if (text.startsWith("/tax") || text.startsWith("/maliat")) {
+      const parts = text.split(/\s+/);
+      if (parts.length > 1) {
+        const rateStr = toAsciiDigits(parts[1]).trim().replace(/٫/g, ".");
+        const num = parseFloat(rateStr);
+        if (!Number.isNaN(num) && Number.isFinite(num) && num >= 0 && num <= 100) {
+          state = this.advance(state, (s) => {
+            s.taxPercent = num;
+            return s;
+          });
+          await this.saveState(state);
+          await sendMessage(
+            token,
+            chatId,
+            `✅ درصد مالیات روی ٪${toPersianDigits(rateStr).replace(/\./g, "٫")} تنظیم شد.`
+          );
+          return;
+        } else {
+          await sendMessage(
+            token,
+            chatId,
+            "❗️درصد مالیات باید عددی بین ۰ تا ۱۰۰ باشد (مثال: /tax 10 یا /tax 0 یا /tax 9.5)."
+          );
+          return;
+        }
+      } else {
+        await sendMessage(
+          token,
+          chatId,
+          `درصد مالیات جاری: ٪${toPersianDigits(String(state.taxPercent ?? 10)).replace(/\./g, "٫")}\nبرای تغییر، ارسال کنید: /tax 0 یا /tax 10`
+        );
+        return;
+      }
+    }
+
     if (isCustomerDetailStep(state.step)) {
       await this.onCustomerDetailField(chatId, token, state, text);
       return;
@@ -353,6 +388,7 @@ export class InvoiceSession extends DurableObject {
       s.items.push({
         description: s.currentItem.description,
         quantityMilli: s.currentItem.quantityMilli,
+        unit: s.currentItem.unit || "",
         unitPriceRial: price.toString(),
       });
       s.currentItem = {};
@@ -371,11 +407,12 @@ export class InvoiceSession extends DurableObject {
 
   async sendItemAddedSummary(chatId, token, state) {
     const last = state.items[state.items.length - 1];
+    const unitLabel = last.unit ? ` ${escapeHtml(last.unit)}` : "";
     await sendMessage(
       token,
       chatId,
       `✅ ردیف ${toPersianDigits(state.items.length)} ثبت شد:\n` +
-        `«${escapeHtml(last.description)}» — ${formatQtyMilli(BigInt(last.quantityMilli))} × ${formatBigRial(BigInt(last.unitPriceRial))} ریال`
+        `«${escapeHtml(last.description)}» — ${formatQtyMilli(BigInt(last.quantityMilli))}${unitLabel} × ${formatBigRial(BigInt(last.unitPriceRial))} ریال`
     );
   }
 
@@ -713,7 +750,7 @@ export class InvoiceSession extends DurableObject {
 
       const items = state.items.map((it) => ({
         description: it.description,
-        unit: "",
+        unit: it.unit || "",
         quantityMilli: BigInt(it.quantityMilli),
         unitPriceRial: BigInt(it.unitPriceRial),
       }));

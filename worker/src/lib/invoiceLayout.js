@@ -210,7 +210,7 @@ export function layoutInvoicePages(options) {
         "صفحه " + toPersianDigits(index + 1) + " از " + toPersianDigits(finalPages.length)
       );
     }
-    if (finalPages.length > 1 && !page.querySelector(".print-page-number")) {
+    if (finalPages.length > 1 && meta.length === 0 && !page.querySelector(".print-page-number")) {
       const number = document.createElement("span");
       number.className = "print-page-number";
       number.textContent =

@@ -304,7 +304,7 @@ describe("bot-only regressions", () => {
 		await send(chatId, textUpdate(chatId, "➕ فاکتور جدید", nextUpdateId()));
 		await send(chatId, callbackUpdate(chatId, "company:fouladBonyan", nextUpdateId()));
 		await send(chatId, textUpdate(chatId, "مشتری ۳۰", nextUpdateId()));
-		await send(chatId, callbackUpdate(chatId, "custact:items", nextUpdateId()));
+		await send(chatId, callbackUpdate(chatId, "custentry:items", nextUpdateId()));
 
 		// Seed 29 items directly in state
 		const current = (await readState(chatId)) || {};
@@ -329,6 +329,18 @@ describe("bot-only regressions", () => {
 		expect(finalState.items.length).toBe(30);
 		expect(finalState.items[29].description).toBe("کالای سی‌ام");
 		expect(finalState.step).toBe("ask_stamp");
+	});
+
+	it("allows configuring or zeroing out the tax percentage via /tax command", async () => {
+		const chatId = freshChatId();
+		await send(chatId, textUpdate(chatId, "/start", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "/tax 0", nextUpdateId()));
+		let state = await readState(chatId);
+		expect(state.taxPercent).toBe(0);
+
+		await send(chatId, textUpdate(chatId, "/tax 9.5", nextUpdateId()));
+		state = await readState(chatId);
+		expect(state.taxPercent).toBe(9.5);
 	});
 });
 

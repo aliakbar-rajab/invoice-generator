@@ -289,6 +289,7 @@
   // ---------- Application dialog ----------
 
   var activeDialogResolve = null;
+  var dialogPreviousFocus = null;
 
   function closeAppDialog(result) {
     if (appDialogEl.hidden) return;
@@ -296,6 +297,10 @@
     var resolve = activeDialogResolve;
     activeDialogResolve = null;
     if (resolve) resolve(result || { action: "cancel", value: "" });
+    if (dialogPreviousFocus && typeof dialogPreviousFocus.focus === "function") {
+      try { dialogPreviousFocus.focus(); } catch (err) {}
+      dialogPreviousFocus = null;
+    }
   }
 
   var DIALOG_FOCUSABLE_SELECTOR =
@@ -372,6 +377,7 @@
 
     return new Promise(function (resolve) {
       activeDialogResolve = resolve;
+      dialogPreviousFocus = document.activeElement;
       actions.forEach(function (action) {
         var button = document.createElement("button");
         button.type = "button";
@@ -1325,11 +1331,23 @@
     });
   }
 
+  var companyEditorPreviousFocus = null;
+
   function closeCompanyEditor() {
     companyEditorDialogEl.hidden = true;
     companyEditorErrorEl.hidden = true;
     companyLogoFileEl.value = "";
     if (companyStampFileEl) companyStampFileEl.value = "";
+    if (companyEditorPreviousFocus && typeof companyEditorPreviousFocus.focus === "function") {
+      try {
+        if (companyEditorPreviousFocus.offsetParent !== null) {
+          companyEditorPreviousFocus.focus();
+        } else if (settingsBtnEl && typeof settingsBtnEl.focus === "function") {
+          settingsBtnEl.focus();
+        }
+      } catch (err) {}
+      companyEditorPreviousFocus = null;
+    }
   }
 
   function setCompanyEditorFieldValue(field, value) {
@@ -1339,6 +1357,7 @@
   }
 
   function openCompanyEditor(mode) {
+    companyEditorPreviousFocus = document.activeElement;
     var selectedKey = profileSelectEl.value;
     var editingExisting = mode === "edit" && !isCustomProfile(selectedKey);
     var adHoc = isCustomProfile(selectedKey);
@@ -1843,6 +1862,9 @@
   // apart: an empty tax rate legitimately means zero, while a malformed one
   // must never be quietly treated as one.
   function normalizeStrictNumber(value) {
+    if (typeof window !== "undefined" && typeof window.normalizeStrictNumber === "function") {
+      return window.normalizeStrictNumber(value);
+    }
     var raw = toAsciiDigits(String(value == null ? "" : value)).trim().replace(/٫/g, ".");
     if (!raw) return "";
     var sign = "";
@@ -1854,7 +1876,11 @@
     if (pieces.length > 2) return null;
     var intPart = pieces[0];
     var fracPart = pieces.length > 1 ? pieces[1] : null;
-    if (!STRICT_UNGROUPED_INT.test(intPart) && !STRICT_GROUPED_INT.test(intPart)) return null;
+    if (!intPart && fracPart !== null) {
+      intPart = "0";
+    } else if (!STRICT_UNGROUPED_INT.test(intPart) && !STRICT_GROUPED_INT.test(intPart)) {
+      return null;
+    }
     // Grouping inside the fractional part is never meaningful ("1.0,5").
     if (fracPart !== null && !/^\d*$/.test(fracPart)) return null;
     return sign + intPart.replace(/[,٬\s]/g, "") + (fracPart === null ? "" : "." + fracPart);
@@ -2131,7 +2157,11 @@
         el.addEventListener("blur", function () {
           var percent = strictPercent(this.value);
           if (percent.valid) this.value = formatPercentBps(percent.value);
+          this.size = Math.max(2, (this.value || "").length);
           recalcAll();
+        });
+        el.addEventListener("input", function () {
+          this.size = Math.max(2, (this.value || "").length);
         });
       } else {
         if (el.isContentEditable && (field === "meta.title" || field === "company.name")) {
@@ -2140,6 +2170,11 @@
               event.preventDefault();
               el.blur();
             }
+          });
+          el.addEventListener("paste", function (event) {
+            event.preventDefault();
+            var text = (event.clipboardData || window.clipboardData).getData("text/plain") || "";
+            document.execCommand("insertText", false, text.replace(/[\r\n]+/g, " "));
           });
         }
         el.addEventListener("blur", function () {
@@ -2268,7 +2303,9 @@
       buyer: Object.assign({}, defaults.buyer, raw && raw.buyer),
       seller: sellerData,
       company: companyData,
-      taxPercent: raw && raw.taxPercent != null ? raw.taxPercent : defaults.taxPercent,
+      taxPercent: raw && raw.taxPercent != null
+        ? raw.taxPercent
+        : (raw && (raw.items || raw.meta) ? "۰" : defaults.taxPercent),
       notes: raw && raw.notes != null ? raw.notes : defaults.notes,
       includeStamp: raw && raw.includeStamp != null ? !!raw.includeStamp : defaults.includeStamp,
       items: raw && Array.isArray(raw.items)
@@ -3036,7 +3073,7 @@
       clone.classList.remove("stamp-enabled");
     }
 
-    if ((options.totalPages || 1) > 1) {
+    if ((options.totalPages || 1) > 1 && !options.continuation) {
       var pageNumber = document.createElement("span");
       pageNumber.className = "print-page-number";
       pageNumber.textContent = "صفحه " + toPersianDigits(options.pageNo || 1) + " از " + toPersianDigits(options.totalPages || 1);

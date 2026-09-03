@@ -99,6 +99,15 @@ describe("buildInvoiceHtml tax & totals", () => {
 		expect(html).not.toMatch(/<td class="col-total cell-computed">۰<\/td>/);
 	});
 
+	it("renders decimal tax percent with Persian momayyez separator", () => {
+		const html = buildInvoiceHtml(baseInvoiceData({
+			items: [{ description: "کالا", unit: "عدد", quantityMilli: 1000n, unitPriceRial: 1000000n }],
+			taxPercent: 10.5,
+		}));
+		expect(html).toContain("مالیات و عوارض (٪۱۰٫۵)</span><strong>۱۰۵٬۰۰۰ ریال</strong>");
+		expect(html).not.toContain("٪۱۰.5");
+	});
+
 	it("omits the logo chip completely when company has no logo", () => {
 		const html = buildInvoiceHtml(baseInvoiceData({
 			company: { name: "شرکت بدون آرم", logoDataUri: null },

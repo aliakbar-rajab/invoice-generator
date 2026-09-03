@@ -1055,7 +1055,10 @@ body {
 /* More specific than the generic `.inv-input` rule below (width: 100%) so
    this field stays compact instead of stretching its flex wrapper. */
 .inv-tax-percent-wrap .inv-tax-percent.inv-input {
-  width: 4.6mm;
+  field-sizing: content;
+  min-width: 4.6mm;
+  max-width: 10mm;
+  width: auto;
   flex: none;
   padding: 0;
   text-align: center;

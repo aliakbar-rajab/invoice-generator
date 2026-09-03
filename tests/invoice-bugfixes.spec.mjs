@@ -723,3 +723,101 @@ test("parsePercentBps and formatPercentBps are exported and round-trip correctly
   expect(p.formatPercentBps(1050n)).toBe("۱۰٫۵");
 });
 
+test("leading decimal values (.5 and ٫۵) in quantity and taxPercent compute accurately without error", async ({ page }) => {
+  await openApp(page);
+  await fillValidFirstRow(page, "1000000");
+  await cell(page, 1, "quantity").fill(".5");
+  await cell(page, 1, "quantity").press("Tab");
+
+  // .5 * 1000000 = 500000
+  await expect(page.locator("#inv-rows tr").first().locator('[data-row-computed="total"]')).toHaveText("۵۰۰٬۰۰۰");
+
+  const taxInput = page.getByLabel("درصد مالیات و عوارض", { exact: true });
+  await taxInput.fill(".5");
+  await taxInput.press("Tab");
+  await expect(taxInput).toHaveValue("۰٫۵");
+
+  // Gross 500,000 + 0.5% tax (2,500) = 502,500
+  await expect(page.locator('[data-total="grossTotal"]')).toHaveText("۵۰۰٬۰۰۰ ریال");
+  await expect(page.locator('[data-total="taxTotal"]')).toHaveText("۲٬۵۰۰ ریال");
+  await expect(page.locator('[data-total="netTotal"]')).toHaveText("۵۰۲٬۵۰۰ ریال");
+
+  await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار آزمایشی");
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(1);
+});
+
+test("decimal tax percentage (10.5%) does not shrink font or cause false numeric-overflow warning", async ({ page }) => {
+  await openApp(page);
+  await fillValidFirstRow(page, "1000000");
+  await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار آزمایشی");
+
+  const taxInput = page.getByLabel("درصد مالیات و عوارض", { exact: true });
+  await taxInput.fill("10.5");
+  await taxInput.press("Tab");
+  await expect(taxInput).toHaveValue("۱۰٫۵");
+
+  const overflow = await taxInput.evaluate((el) => el.classList.contains("numeric-overflow"));
+  expect(overflow).toBe(false);
+
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(1);
+
+  const texts = await warningTexts(page);
+  expect(texts.some((t) => t.includes("مبالغ بسیار طولانی"))).toBe(false);
+});
+
+test("modal dialogs restore focus to the opening element when dismissed", async ({ page }) => {
+  await openApp(page);
+  await fillValidFirstRow(page, "1000");
+
+  const newBtn = page.locator("#btn-new");
+  await newBtn.focus();
+  await newBtn.click();
+  await expect(page.locator("#app-dialog")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#app-dialog")).toBeHidden();
+  await expect(newBtn).toBeFocused();
+
+  const settingsBtn = page.locator("#btn-settings");
+  await settingsBtn.click();
+  const editorBtn = page.locator("#btn-company-editor");
+  await editorBtn.focus();
+  await editorBtn.click();
+  await expect(page.locator("#company-editor-dialog")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#company-editor-dialog")).toBeHidden();
+  await expect(settingsBtn).toBeFocused();
+});
+
+test("an older backup without taxPercent defaults to 0% tax, not imposing 10%", async ({ page }) => {
+  await openApp(page);
+  const legacyWithoutTax = {
+    version: 7,
+    orientation: "landscape",
+    meta: { number: "۱۴۰۴۰۱۰۱-۰۰۲", date: "۱۴۰۴/۰۱/۰۱" },
+    buyer: { name: "خریدار فاقد مالیات" },
+    seller: {},
+    company: { profile: "fouladBonyan" },
+    notes: "",
+    items: [
+      { description: "کالای معاف", quantity: "1", unit: "عدد", unitPrice: "1000000" },
+    ],
+  };
+  await page.evaluate((data) => {
+    const input = document.getElementById("file-open");
+    const file = new File([JSON.stringify(data)], "legacy.json", { type: "application/json" });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, legacyWithoutTax);
+
+  await expect(page.getByLabel("نام خریدار", { exact: true })).toHaveValue("خریدار فاقد مالیات");
+  await expect(page.getByLabel("درصد مالیات و عوارض", { exact: true })).toHaveValue("۰");
+  await expect(page.locator('[data-total="netTotal"]')).toHaveText("۱٬۰۰۰٬۰۰۰ ریال");
+});
+
+

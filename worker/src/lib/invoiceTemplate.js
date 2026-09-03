@@ -233,7 +233,7 @@ export function buildInvoiceHtml(data) {
   const closingBlock = `<section class="inv-summary">
     <div class="inv-totals">
       <div><span>جمع کل</span><strong>${formatBigRial(grossTotal)} ریال</strong></div>
-      <div><span>مالیات و عوارض (٪${toPersianDigits(taxPercent)})</span><strong>${formatBigRial(taxTotal)} ریال</strong></div>
+      <div><span>مالیات و عوارض (٪${toPersianDigits(String(taxPercent)).replace(/\./g, "٫")})</span><strong>${formatBigRial(taxTotal)} ریال</strong></div>
       <div class="inv-total-final"><span>مبلغ قابل پرداخت</span><strong>${formatBigRial(netTotal)} ریال</strong></div>
     </div>
     <section class="inv-amount-words">
