@@ -1,10 +1,9 @@
 /*
  * Persian/Arabic digit + number-to-words helpers.
  *
- * Ported from the desktop invoice app's js/persian-numbers.js (same
- * BigInt-based approach — Rial amounts routinely exceed
- * Number.MAX_SAFE_INTEGER, so every money/quantity value here is exact
- * BigInt arithmetic, never `Number`).
+ * Single source of truth mirrored from js/persian-numbers.js.
+ * All money/quantity/percent math below is BigInt-based (arbitrary-precision
+ * integers), never `Number`.
  */
 
 // Both Persian (U+06F0) and Arabic-Indic (U+0660) digit blocks run 0-9 in
@@ -27,57 +26,52 @@ export function toPersianDigits(value) {
 const GROUP_SEP = "٬"; // Arabic thousands separator (matches fa-IR grouping)
 const DECIMAL_SEP = "٫"; // Arabic decimal separator (matches fa-IR decimal point)
 
-// An integer part is either bare digits, or 1-3 digits followed by complete
-// 3-digit groups joined by ONE consistent separator — "1000", "1,000",
-// "1٬000٬000", "1 000 000". Anything else that merely contains a separator
-// is not a grouped number.
 const STRICT_UNGROUPED_INT = /^\d+$/;
 const STRICT_GROUPED_INT = /^\d{1,3}(?:([,٬\s])\d{3})(?:\1\d{3})*$/;
 
-// Normalizes a user-typed numeric string to plain ASCII digits with a "."
-// decimal point, or returns null when the text is not a well-formed number.
-//
-// Grouping separators are stripped only after the grouping they claim to
-// express has been verified. Stripping "," / "٬" / spaces unconditionally
-// (as this did) turned "2,5" into 25 — and a comma is exactly what many
-// keyboards and locales produce for a DECIMAL point, so a quantity typed the
-// European way was silently multiplied by ten with no warning at all. What
-// the bot itself prints ("۱٬۵۰۰٬۰۰۰", "۲٫۵") still round-trips unchanged.
-//
-// This mirrors normalizeStrictNumber in the desktop app (js/app.js), where
-// the same bug was found and fixed first; the bot never got that fix, so the
-// two halves of the same product disagreed about what "2,5" meant.
-//
-// "" means genuinely empty; null means malformed. Callers must keep those
-// apart wherever an empty value has a legitimate meaning of its own.
-export function normalizeStrictNumber(value) {
-  let raw = toAsciiDigits(String(value == null ? "" : value)).trim().replace(/٫/g, ".");
-  if (!raw) return "";
-  let sign = "";
-  if (raw.charAt(0) === "-") {
-    sign = "-";
-    raw = raw.slice(1);
+export function normalizeStrictNumber(raw) {
+  if (raw === null || raw === undefined) return null;
+  const text = toAsciiDigits(String(raw).trim());
+  if (!text) return "";
+  const sign = text.indexOf("-") === 0 ? "-" : "";
+  const unsigned = sign ? text.slice(1) : text;
+  if (!unsigned) return null;
+
+  let intPart = unsigned;
+  let fracPart = "";
+  const decimalMatch = unsigned.match(/^([^.٫]*)[.٫](.*)$/);
+  if (decimalMatch) {
+    intPart = decimalMatch[1];
+    fracPart = decimalMatch[2];
+    if (intPart.indexOf(".") !== -1 || intPart.indexOf("٫") !== -1 || fracPart.indexOf(".") !== -1 || fracPart.indexOf("٫") !== -1) {
+      return null;
+    }
   }
-  const pieces = raw.split(".");
-  if (pieces.length > 2) return null;
-  const intPart = pieces[0];
-  const fracPart = pieces.length > 1 ? pieces[1] : null;
-  const effectiveInt = (!intPart && fracPart) ? "0" : intPart;
-  if (!STRICT_UNGROUPED_INT.test(effectiveInt) && !STRICT_GROUPED_INT.test(effectiveInt)) return null;
-  // Grouping inside the fractional part is never meaningful ("1.0,5").
-  if (fracPart !== null && !/^\d*$/.test(fracPart)) return null;
-  return sign + effectiveInt.replace(/[,٬\s]/g, "") + (fracPart === null ? "" : "." + fracPart);
+
+  if (fracPart && !/^\d+$/.test(fracPart)) return null;
+
+  let plainInt = intPart;
+  if (!intPart && fracPart) {
+    plainInt = "0";
+  } else if (/[, ٬\s]/.test(intPart)) {
+    if (!STRICT_GROUPED_INT.test(intPart)) return null;
+    plainInt = intPart.replace(/[, ٬\s]/g, "");
+  } else if (!STRICT_UNGROUPED_INT.test(intPart)) {
+    return null;
+  }
+
+  return fracPart ? sign + plainInt + "." + fracPart : sign + plainInt;
 }
 
-// Parses a numeric string into a BigInt scaled by 10^decimals (e.g.
-// decimals=3 turns "2.755" into 2755n), rounding half-up on any digits
-// beyond that precision. Returns null when the input isn't a valid number
-// (as opposed to 0n for a genuinely empty/zero input).
+export function normalizeNumericInput(value) {
+  return normalizeStrictNumber(value);
+}
+
 export function parseDecimalToBigIntScaled(value, decimals) {
   const normalized = normalizeStrictNumber(value);
-  if (normalized === null) return null;
+  if (normalized === null || normalized === "") return 0n;
   const match = normalized.match(/^(-?)(\d*)(?:\.(\d*))?$/);
-  if (!match || (!match[2] && !match[3])) return null;
+  if (!match) return 0n;
 
   const sign = match[1] === "-" ? -1n : 1n;
   const intDigits = match[2] || "0";
@@ -91,14 +85,12 @@ export function parseDecimalToBigIntScaled(value, decimals) {
   try {
     scaled = BigInt(intDigits + keep);
   } catch (err) {
-    return null;
+    return 0n;
   }
   if (roundDigit >= "5") scaled += 1n;
   return sign * scaled;
 }
 
-// Rounds numerator/denominator to the nearest integer (half-up), entirely
-// in BigInt arithmetic so no intermediate float ever touches the value.
 export function bigRoundDiv(numerator, denominator) {
   if (denominator === 0n) return 0n;
   const negResult = (numerator < 0n) !== (denominator < 0n);
@@ -108,7 +100,7 @@ export function bigRoundDiv(numerator, denominator) {
   return negResult ? -result : result;
 }
 
-function groupDigits(digitsAscii, sep) {
+export function groupDigits(digitsAscii, sep) {
   let out = "";
   let count = 0;
   for (let i = digitsAscii.length - 1; i >= 0; i -= 1) {
@@ -119,11 +111,6 @@ function groupDigits(digitsAscii, sep) {
   return out;
 }
 
-// ---------- Money (integer Rial, no fractional subunit) ----------
-
-// Rial has no fractional subunit, so an amount carrying a decimal point is
-// not a Rial amount — rejected outright rather than quietly rounded, which
-// is the rule strictMoney already applies in the desktop app.
 export function parseMoneyBig(value) {
   const normalized = normalizeStrictNumber(value);
   if (!normalized || !/^\d+$/.test(normalized)) return null;
@@ -137,11 +124,6 @@ export function formatBigRial(value) {
   return (neg ? "-" : "") + toPersianDigits(groupDigits(digits, GROUP_SEP));
 }
 
-// ---------- Quantity (up to 3 decimal places, e.g. weight in tons) ----------
-
-// Three decimal places is the precision the printed invoice can actually
-// show, so a fourth is rejected rather than rounded away behind the user's
-// back — same rule as strictQuantity in the desktop app.
 export function parseQtyMilli(value) {
   const normalized = normalizeStrictNumber(value);
   if (!normalized || !/^\d+(?:\.\d{1,3})?$/.test(normalized)) return null;
@@ -164,7 +146,27 @@ export function formatQtyMilli(value) {
   return (neg ? "-" : "") + toPersianDigits(out);
 }
 
-// ---------- Amount in words ----------
+export function parsePercentBps(value) {
+  const normalized = normalizeStrictNumber(value);
+  if (!normalized || !/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+  return parseDecimalToBigIntScaled(normalized, 2);
+}
+
+export function formatPercentBps(value) {
+  const v = value || 0n;
+  const neg = v < 0n;
+  const abs = neg ? -v : v;
+  const intPart = abs / 100n;
+  const fracPart = abs % 100n;
+  let out = intPart.toString();
+  if (fracPart !== 0n) {
+    let fracStr = fracPart.toString();
+    while (fracStr.length < 2) fracStr = "0" + fracStr;
+    fracStr = fracStr.replace(/0+$/, "");
+    out += DECIMAL_SEP + fracStr;
+  }
+  return (neg ? "-" : "") + toPersianDigits(out);
+}
 
 const ONES = ["", "یک", "دو", "سه", "چهار", "پنج", "شش", "هفت", "هشت", "نه",
   "ده", "یازده", "دوازده", "سیزده", "چهارده", "پانزده", "شانزده",
@@ -172,7 +174,7 @@ const ONES = ["", "یک", "دو", "سه", "چهار", "پنج", "شش", "هفت"
 const TENS = ["", "", "بیست", "سی", "چهل", "پنجاه", "شصت", "هفتاد", "هشتاد", "نود"];
 const HUNDREDS = ["", "صد", "دویست", "سیصد", "چهارصد", "پانصد", "ششصد", "هفتصد", "هشتصد", "نهصد"];
 
-function threeDigitsToWords(value) {
+export function threeDigitsToWords(value) {
   const parts = [];
   if (value >= 100) parts.push(HUNDREDS[Math.floor(value / 100)]);
   const remainder = value % 100;
@@ -185,7 +187,7 @@ function threeDigitsToWords(value) {
   return parts.join(" و ");
 }
 
-function scaleWordForGroup(groupIndex) {
+export function scaleWordForGroup(groupIndex) {
   if (groupIndex === 0) return "";
   const exponent = groupIndex * 3;
   const billionRepeats = Math.floor(exponent / 9);
@@ -207,7 +209,7 @@ export function rialToWordsBig(value) {
   let groupIndex = 0;
 
   while (remaining > 0n) {
-    const group = Number(remaining % 1000n); // always 0-999: exact as a plain Number
+    const group = Number(remaining % 1000n);
     if (group) {
       const scaleWord = scaleWordForGroup(groupIndex);
       groups.unshift(threeDigitsToWords(group) + (scaleWord ? " " + scaleWord : ""));

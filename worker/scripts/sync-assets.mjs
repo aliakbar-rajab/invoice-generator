@@ -28,3 +28,4 @@ for (const [from, to] of PAIRS) {
   await cp(source, target, { recursive: true });
   console.log(`synced ${from}/ -> worker/${to}/`);
 }
+

@@ -153,14 +153,17 @@ function formatBigRial(value) {
 // ---------- Quantity (up to 3 decimal places, e.g. weight in tons) ----------
 
 function parseQtyMilli(value) {
-  return parseDecimalToBigIntScaled(value, 3);
+  var normalized = normalizeStrictNumber(value);
+  if (!normalized || !/^\d+(?:\.\d{1,3})?$/.test(normalized)) return null;
+  return parseDecimalToBigIntScaled(normalized, 3);
 }
 
 function formatQtyMilli(value) {
   var v = value || 0n;
   var neg = v < 0n;
   var abs = neg ? -v : v;
-  var intPart = abs / 1000n;
+  var intPart = abs / 100n; // wait, abs / 1000n!
+  intPart = abs / 1000n;
   var fracPart = abs % 1000n;
   var out = groupDigits(intPart.toString(), GROUP_SEP);
   if (fracPart !== 0n) {
@@ -175,7 +178,9 @@ function formatQtyMilli(value) {
 // ---------- Percent (up to 2 decimal places, stored as basis points) ----------
 
 function parsePercentBps(value) {
-  return parseDecimalToBigIntScaled(value, 2);
+  var normalized = normalizeStrictNumber(value);
+  if (!normalized || !/^\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+  return parseDecimalToBigIntScaled(normalized, 2);
 }
 
 function formatPercentBps(value) {
@@ -202,12 +207,6 @@ var ONES = ["", "یک", "دو", "سه", "چهار", "پنج", "شش", "هفت", 
 var TENS = ["", "", "بیست", "سی", "چهل", "پنجاه", "شصت", "هفتاد", "هشتاد", "نود"];
 var HUNDREDS = ["", "صد", "دویست", "سیصد", "چهارصد", "پانصد", "ششصد", "هفتصد", "هشتصد", "نهصد"];
 
-// Formal Persian financial wording only ever combines these three
-// native scale words — never an imported term like «تریلیون»/«کوادریلیون».
-// Beyond «میلیارد» (10^9), larger magnitudes are expressed compositionally
-// the way Iranian financial documents already do (e.g. «هزار میلیارد» for
-// 10^12, «میلیون میلیارد» for 10^15), which this function derives instead
-// of hardcoding a longer scale-name table.
 function threeDigitsToWords(value) {
   var parts = [];
   if (value >= 100) parts.push(HUNDREDS[Math.floor(value / 100)]);
@@ -221,14 +220,6 @@ function threeDigitsToWords(value) {
   return parts.join(" و ");
 }
 
-// `groupIndex` counts 3-digit groups from the ones group (0 = ones,
-// 1 = thousands, 2 = millions, 3 = billions, ...). Each step of 3 in the
-// exponent (E = groupIndex * 3) is covered by combining «هزار» (+3),
-// «میلیون» (+6) and repeats of «میلیارد» (+9): k = floor(E / 9) gives the
-// number of «میلیارد» repeats and the remainder (0, 3 or 6) picks the
-// «هزار»/«میلیون» prefix — e.g. groupIndex 4 (10^12) -> E=12 -> k=1, r=3
-// -> "هزار میلیارد", matching how Iranian financial documents already
-// name figures beyond a billion instead of borrowing "trillion".
 function scaleWordForGroup(groupIndex) {
   if (groupIndex === 0) return "";
   var exponent = groupIndex * 3;
@@ -251,7 +242,7 @@ function rialToWordsBig(value) {
   var groupIndex = 0;
 
   while (remaining > 0n) {
-    var group = Number(remaining % 1000n); // always 0-999: exact as a plain Number
+    var group = Number(remaining % 1000n);
     if (group) {
       var scaleWord = scaleWordForGroup(groupIndex);
       groups.unshift(threeDigitsToWords(group) + (scaleWord ? " " + scaleWord : ""));
@@ -263,6 +254,27 @@ function rialToWordsBig(value) {
   return (neg ? "منفی " : "") + groups.join(" و ") + " ریال";
 }
 
+if (typeof window !== "undefined") {
+  window.PersianNumbers = {
+    toPersianDigits: toPersianDigits,
+    toAsciiDigits: toAsciiDigits,
+    normalizeStrictNumber: normalizeStrictNumber,
+    normalizeNumericInput: normalizeNumericInput,
+    parseDecimalToBigIntScaled: parseDecimalToBigIntScaled,
+    bigRoundDiv: bigRoundDiv,
+    groupDigits: groupDigits,
+    parseMoneyBig: parseMoneyBig,
+    parseQtyMilli: parseQtyMilli,
+    parsePercentBps: parsePercentBps,
+    formatBigRial: formatBigRial,
+    formatQtyMilli: formatQtyMilli,
+    formatPercentBps: formatPercentBps,
+    threeDigitsToWords: threeDigitsToWords,
+    scaleWordForGroup: scaleWordForGroup,
+    rialToWordsBig: rialToWordsBig,
+  };
+}
+
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     toPersianDigits: toPersianDigits,
@@ -271,12 +283,15 @@ if (typeof module !== "undefined" && module.exports) {
     normalizeNumericInput: normalizeNumericInput,
     parseDecimalToBigIntScaled: parseDecimalToBigIntScaled,
     bigRoundDiv: bigRoundDiv,
+    groupDigits: groupDigits,
     parseMoneyBig: parseMoneyBig,
     parseQtyMilli: parseQtyMilli,
     parsePercentBps: parsePercentBps,
     formatBigRial: formatBigRial,
     formatQtyMilli: formatQtyMilli,
     formatPercentBps: formatPercentBps,
+    threeDigitsToWords: threeDigitsToWords,
+    scaleWordForGroup: scaleWordForGroup,
     rialToWordsBig: rialToWordsBig,
   };
 }
