@@ -280,6 +280,56 @@ describe("bot-only regressions", () => {
 		expect(state.customCompanyName).toBe("شرکت <آزمایشی>");
 		expect(state.step).toBe("customer_name");
 	});
+
+	it("does not wipe out state when back is tapped with an empty history", async () => {
+		const chatId = freshChatId();
+		await runInDurableObject(stubFor(chatId), (instance, state) =>
+			state.storage.put("state", {
+				step: "customer_name",
+				companyKey: "fouladBonyan",
+				buyerName: "مشتری نمونه",
+				items: [],
+				history: [],
+			})
+		);
+		await send(chatId, callbackUpdate(chatId, "back", nextUpdateId()));
+		const state = await readState(chatId);
+		expect(state.step).toBe("customer_name");
+		expect(state.buyerName).toBe("مشتری نمونه");
+	});
+
+	it("preserves the 30th item and advances to ask_stamp when reaching MAX_ITEMS", async () => {
+		const chatId = freshChatId();
+		await send(chatId, textUpdate(chatId, "/start", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "➕ فاکتور جدید", nextUpdateId()));
+		await send(chatId, callbackUpdate(chatId, "company:fouladBonyan", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "مشتری ۳۰", nextUpdateId()));
+		await send(chatId, callbackUpdate(chatId, "custact:items", nextUpdateId()));
+
+		// Seed 29 items directly in state
+		const current = (await readState(chatId)) || {};
+		current.items = current.items || [];
+		for (let i = 1; i <= 29; i++) {
+			current.items.push({
+				description: `کالا ${i}`,
+				quantityMilli: "1000",
+				unitPriceRial: "10000",
+			});
+		}
+		current.currentItem = { description: "کالای سی‌ام", quantityMilli: "1000" };
+		current.step = "item_price";
+		await runInDurableObject(stubFor(chatId), (instance, state) => {
+			instance.state = current;
+			return state.storage.put("state", current);
+		});
+
+		// Enter price for item 30
+		await send(chatId, textUpdate(chatId, "50000", nextUpdateId()));
+		const finalState = await readState(chatId);
+		expect(finalState.items.length).toBe(30);
+		expect(finalState.items[29].description).toBe("کالای سی‌ام");
+		expect(finalState.step).toBe("ask_stamp");
+	});
 });
 
 // ---------- Invoice numbering ----------

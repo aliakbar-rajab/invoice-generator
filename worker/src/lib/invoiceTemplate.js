@@ -1,5 +1,13 @@
 import { invoiceStyles } from "./invoiceStyles.js";
-import { bigRoundDiv, formatBigRial, formatQtyMilli, rialToWordsBig, toPersianDigits } from "./persianNumbers.js";
+import {
+  bigRoundDiv,
+  formatBigRial,
+  formatQtyMilli,
+  parseDecimalToBigIntScaled,
+  rialToWordsBig,
+  toAsciiDigits,
+  toPersianDigits,
+} from "./persianNumbers.js";
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -55,7 +63,20 @@ export function computeTotals(items, taxPercent = 0) {
     return { ...item, lineTotal };
   });
   const grossTotal = lines.reduce((sum, l) => sum + l.lineTotal, 0n);
-  const taxBasisPoints = BigInt(Math.round(Number(taxPercent || 0) * 100));
+
+  let taxBasisPoints = 0n;
+  if (typeof taxPercent === "number" && !Number.isNaN(taxPercent) && Number.isFinite(taxPercent)) {
+    taxBasisPoints = BigInt(Math.max(0, Math.round(taxPercent * 100)));
+  } else if (typeof taxPercent === "bigint") {
+    taxBasisPoints = taxPercent > 0n ? taxPercent * 100n : 0n;
+  } else if (taxPercent != null) {
+    const normalized = toAsciiDigits(String(taxPercent).trim()).replace(/٫/g, ".");
+    const parsed = parseDecimalToBigIntScaled(normalized, 2);
+    if (parsed !== null && parsed > 0n) {
+      taxBasisPoints = parsed;
+    }
+  }
+
   const taxTotal = bigRoundDiv(grossTotal * taxBasisPoints, 10000n);
   const netTotal = grossTotal + taxTotal;
   return { lines, grossTotal, taxTotal, netTotal };
@@ -88,7 +109,7 @@ function blankItemRow(index) {
     <td class="col-qty"></td>
     <td class="col-unit"></td>
     <td class="col-price cell-computed"></td>
-    <td class="col-total cell-computed">${formatBigRial(0n)}</td>
+    <td class="col-total cell-computed"></td>
   </tr>`;
 }
 
@@ -130,6 +151,7 @@ export function buildInvoiceHtml(data) {
   const logoImg = company.logoDataUri
     ? `<img class="inv-logo" alt="آرم شرکت" src="${company.logoDataUri}" />`
     : "";
+  const logoChip = logoImg ? `<span class="inv-logo-chip">${logoImg}</span>` : "";
   const stampImg = includeStamp && company.stampDataUri
     ? `<img class="inv-signature-stamp" alt="مهر شرکت" src="${company.stampDataUri}" />`
     : "";
@@ -148,7 +170,7 @@ export function buildInvoiceHtml(data) {
   const fullHead = `<header class="inv-head">
     <p class="inv-doc-title">پیش‌فاکتور</p>
     <div class="inv-brand">
-      <span class="inv-logo-chip">${logoImg}</span>
+      ${logoChip}
       <div class="inv-brand-text"><h1>${escapeHtml(company.name)}</h1></div>
     </div>
     <dl class="inv-meta">

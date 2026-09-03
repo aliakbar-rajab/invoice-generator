@@ -81,5 +81,29 @@ describe("buildInvoiceHtml tax & totals", () => {
 		expect(html).toContain("مالیات و عوارض (٪۰)</span><strong>۰ ریال</strong>");
 		expect(html).toContain("مبلغ قابل پرداخت</span><strong>۱٬۰۰۰٬۰۰۰ ریال</strong>");
 	});
+
+	it("safely handles Persian digit tax strings without throwing RangeError", () => {
+		const html = buildInvoiceHtml(baseInvoiceData({
+			items: [{ description: "کالا", unit: "عدد", quantityMilli: 1000n, unitPriceRial: 1000000n }],
+			taxPercent: "۱۰",
+		}));
+		expect(html).toContain("مالیات و عوارض (٪۱۰)</span><strong>۱۰۰٬۰۰۰ ریال</strong>");
+		expect(html).toContain("مبلغ قابل پرداخت</span><strong>۱٬۱۰۰٬۰۰۰ ریال</strong>");
+	});
+
+	it("leaves filler row total cell empty rather than printing zero", () => {
+		const html = buildInvoiceHtml(baseInvoiceData({
+			items: [{ description: "کالا", unit: "عدد", quantityMilli: 1000n, unitPriceRial: 1000000n }],
+		}));
+		expect(html).toContain('<td class="col-total cell-computed"></td>');
+		expect(html).not.toMatch(/<td class="col-total cell-computed">۰<\/td>/);
+	});
+
+	it("omits the logo chip completely when company has no logo", () => {
+		const html = buildInvoiceHtml(baseInvoiceData({
+			company: { name: "شرکت بدون آرم", logoDataUri: null },
+		}));
+		expect(html).not.toContain('class="inv-logo-chip"');
+	});
 });
 

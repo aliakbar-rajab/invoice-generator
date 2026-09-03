@@ -25,7 +25,7 @@ import { renderInvoicePdf } from "../lib/pdf.js";
 import { loadDataUri } from "../lib/assets.js";
 
 const MAIN_MENU = replyKeyboard([["➕ فاکتور جدید"]]);
-const MAX_HISTORY = 20;
+const MAX_HISTORY = 100;
 const MAX_ITEMS = 30;
 
 const WAIT_MESSAGE_TEXT = "⏳ در حال آماده‌سازی و ارسال پیش‌فاکتور، لطفاً منتظر بمانید…";
@@ -71,6 +71,7 @@ function freshState() {
     buyerPhone: null,
     items: [],
     currentItem: {},
+    taxPercent: 10,
     includeStamp: null,
     history: [],
   };
@@ -133,7 +134,7 @@ export class InvoiceSession extends DurableObject {
   }
 
   goBack(state) {
-    if (state.history.length === 0) return freshState();
+    if (state.history.length === 0) return state;
     const previous = state.history[state.history.length - 1];
     return { ...structuredClone(previous), history: state.history.slice(0, -1) };
   }
@@ -339,6 +340,7 @@ export class InvoiceSession extends DurableObject {
     if (state.items.length >= MAX_ITEMS) {
       await sendMessage(token, chatId, `❗️حداکثر ${toPersianDigits(MAX_ITEMS)} قلم کالا در هر فاکتور مجاز است.`);
       const next = this.advance(state, (s) => {
+        s.currentItem = {};
         s.step = "ask_stamp";
         return s;
       });
@@ -354,12 +356,17 @@ export class InvoiceSession extends DurableObject {
         unitPriceRial: price.toString(),
       });
       s.currentItem = {};
-      s.step = "item_more";
+      s.step = s.items.length >= MAX_ITEMS ? "ask_stamp" : "item_more";
       return s;
     });
     await this.saveState(next);
     await this.sendItemAddedSummary(chatId, token, next);
-    await this.promptItemMore(chatId, token, next);
+    if (next.items.length >= MAX_ITEMS) {
+      await sendMessage(token, chatId, `❗️سقف ${toPersianDigits(MAX_ITEMS)} قلم کالا تکمیل شد.`);
+      await this.promptStamp(chatId, token);
+    } else {
+      await this.promptItemMore(chatId, token, next);
+    }
   }
 
   async sendItemAddedSummary(chatId, token, state) {

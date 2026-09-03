@@ -35,6 +35,9 @@ function toPersianDigits(value) {
 var GROUP_SEP = "٬"; // ٬ Arabic thousands separator (matches fa-IR grouping)
 var DECIMAL_SEP = "٫"; // ٫ Arabic decimal separator (matches fa-IR decimal point)
 
+var STRICT_UNGROUPED_INT = /^\d+$/;
+var STRICT_GROUPED_INT = /^\d{1,3}(?:([,٬\s])\d{3})(?:\1\d{3})*$/;
+
 // Normalizes a user-typed numeric string to ASCII digits with a plain "."
 // decimal point, rejecting malformed grouping separators (such as "1,5" or "12,34").
 function normalizeStrictNumber(raw) {
@@ -59,22 +62,20 @@ function normalizeStrictNumber(raw) {
   if (fracPart && !/^\d+$/.test(fracPart)) return null;
 
   var plainInt = intPart;
-  if (/[, ٬]/.test(intPart)) {
-    if (!/^\d{1,3}(?:[, ٬]\d{3})+$/.test(intPart)) return null;
-    plainInt = intPart.replace(/[, ٬]/g, "");
+  if (!intPart && fracPart) {
+    plainInt = "0";
+  } else if (/[, ٬\s]/.test(intPart)) {
+    if (!STRICT_GROUPED_INT.test(intPart)) return null;
+    plainInt = intPart.replace(/[, ٬\s]/g, "");
+  } else if (!STRICT_UNGROUPED_INT.test(intPart)) {
+    return null;
   }
-  if (!/^\d+$/.test(plainInt)) return null;
 
   return fracPart ? sign + plainInt + "." + fracPart : sign + plainInt;
 }
 
 function normalizeNumericInput(value) {
-  var strict = normalizeStrictNumber(value);
-  if (strict !== null) return strict;
-  if (value === null || value === undefined) return "";
-  return toAsciiDigits(String(value))
-    .replace(/[,\s٬]/g, "")
-    .replace(/٫/g, ".");
+  return normalizeStrictNumber(value);
 }
 
 // Parses a numeric string into a BigInt scaled by 10^decimals (e.g.
@@ -270,8 +271,10 @@ if (typeof module !== "undefined" && module.exports) {
     bigRoundDiv: bigRoundDiv,
     parseMoneyBig: parseMoneyBig,
     parseQtyMilli: parseQtyMilli,
+    parsePercentBps: parsePercentBps,
     formatBigRial: formatBigRial,
     formatQtyMilli: formatQtyMilli,
+    formatPercentBps: formatPercentBps,
     rialToWordsBig: rialToWordsBig,
   };
 }

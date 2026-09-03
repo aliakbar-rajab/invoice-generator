@@ -62,10 +62,11 @@ export function normalizeStrictNumber(value) {
   if (pieces.length > 2) return null;
   const intPart = pieces[0];
   const fracPart = pieces.length > 1 ? pieces[1] : null;
-  if (!STRICT_UNGROUPED_INT.test(intPart) && !STRICT_GROUPED_INT.test(intPart)) return null;
+  const effectiveInt = (!intPart && fracPart !== null) ? "0" : intPart;
+  if (!STRICT_UNGROUPED_INT.test(effectiveInt) && !STRICT_GROUPED_INT.test(effectiveInt)) return null;
   // Grouping inside the fractional part is never meaningful ("1.0,5").
   if (fracPart !== null && !/^\d*$/.test(fracPart)) return null;
-  return sign + intPart.replace(/[,٬\s]/g, "") + (fracPart === null ? "" : "." + fracPart);
+  return sign + effectiveInt.replace(/[,٬\s]/g, "") + (fracPart === null ? "" : "." + fracPart);
 }
 
 // Parses a numeric string into a BigInt scaled by 10^decimals (e.g.

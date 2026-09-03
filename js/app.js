@@ -2134,7 +2134,7 @@
           recalcAll();
         });
       } else {
-        if (el.isContentEditable && field === "meta.title") {
+        if (el.isContentEditable && (field === "meta.title" || field === "company.name")) {
           el.addEventListener("keydown", function (event) {
             if (event.key === "Enter") {
               event.preventDefault();
@@ -2143,6 +2143,7 @@
           });
         }
         el.addEventListener("blur", function () {
+          if (field === "company.website") return;
           if (el.isContentEditable) el.textContent = toPersianDigits(el.textContent);
           else el.value = toPersianDigits(el.value);
           if (field === "meta.date") {
@@ -2155,7 +2156,7 @@
         });
         if (el.tagName === "INPUT") {
           el.addEventListener("input", function () {
-            livePersianizeDigits(el);
+            if (field !== "company.website") livePersianizeDigits(el);
             fitNumericEl(el);
             // Once the user has actually typed into the number field, it is
             // no longer a live suggestion — a later company switch must not
@@ -2715,6 +2716,7 @@
       currentSavedId = null;
       currentSavedName = "";
       currentSavedVersion = null;
+      isDirty = true;
     }
 
     renderSavedList();
@@ -3404,11 +3406,17 @@
     return pages.length;
   }
 
+  var originalDocTitle = null;
+
   function cleanupPrintDocument() {
     document.body.classList.remove("print-mode");
     printDocumentEl.classList.remove("is-measuring");
     printDocumentEl.innerHTML = "";
     printDocumentEl.setAttribute("aria-hidden", "true");
+    if (originalDocTitle !== null) {
+      document.title = originalDocTitle;
+      originalDocTitle = null;
+    }
   }
 
   async function printInvoice() {
@@ -3508,7 +3516,7 @@
 
     renderPrintPlan(realized.pages);
 
-    var oldTitle = document.title;
+    if (originalDocTitle === null) originalDocTitle = document.title;
     document.title = [
       "پیش‌فاکتور",
       safeFilenamePart(data.meta.number),
@@ -3516,7 +3524,6 @@
     ].filter(Boolean).join("_");
     window.setTimeout(function () {
       window.print();
-      document.title = oldTitle;
     }, 0);
     return true;
   }

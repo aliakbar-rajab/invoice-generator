@@ -665,3 +665,61 @@ test("a print that is refused for overflow still releases the busy flag", async 
   await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(1);
 });
+
+test("website field in footer preserves ASCII digits on typing and blur", async ({ page }) => {
+  await openApp(page);
+  const websiteInput = page.locator('[data-field="company.website"]');
+  await websiteInput.fill("www.site123.ir/page45");
+  await websiteInput.blur();
+  expect(await websiteInput.inputValue()).toBe("www.site123.ir/page45");
+  expect(await page.evaluate(() => window.__rejections)).toEqual([]);
+});
+
+test("Enter key on company name heading blurs without adding newlines or div tags", async ({ page }) => {
+  await openApp(page);
+  const companyHeading = page.locator("#inv-company-name");
+  await companyHeading.click();
+  await page.keyboard.press("Enter");
+  const isFocused = await companyHeading.evaluate((el) => document.activeElement === el);
+  expect(isFocused).toBe(false);
+  const innerHtml = await companyHeading.innerHTML();
+  expect(innerHtml).not.toContain("<br>");
+  expect(innerHtml).not.toContain("<div>");
+  expect(await page.evaluate(() => window.__rejections)).toEqual([]);
+});
+
+test("deleting the currently open document marks the document dirty to guard against closing tab", async ({ page }) => {
+  await openApp(page);
+  await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار تستی برای حذف");
+  await page.locator("#btn-save").click();
+  await expect(page.locator("#app-dialog")).toBeVisible();
+  await page.locator("#app-dialog-input").fill("سند تست حذف");
+  await page.locator("#app-dialog-actions button").first().click();
+  await expect(page.locator("#toolbar-status")).toContainText("ذخیره شد");
+
+  await page.locator("#btn-saved-list").click();
+  await expect(page.locator("#saved-panel")).toBeVisible();
+  await page.locator(".saved-item-actions button.danger").first().click();
+  await expect(page.locator("#app-dialog")).toBeVisible();
+  await page.locator("#app-dialog-actions button.danger").click();
+  await expect(page.locator("#toolbar-status")).toContainText("حذف شد");
+
+  const dirtyFlag = await page.evaluate(() => {
+    const e = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(e);
+    return e.defaultPrevented;
+  });
+  expect(dirtyFlag).toBe(true);
+  expect(await page.evaluate(() => window.__rejections)).toEqual([]);
+});
+
+test("parsePercentBps and formatPercentBps are exported and round-trip correctly", async () => {
+  const p = await import("../js/persian-numbers.js");
+  expect(typeof p.parsePercentBps).toBe("function");
+  expect(typeof p.formatPercentBps).toBe("function");
+  expect(p.parsePercentBps("10")).toBe(1000n);
+  expect(p.parsePercentBps("10.5")).toBe(1050n);
+  expect(p.formatPercentBps(1000n)).toBe("۱۰");
+  expect(p.formatPercentBps(1050n)).toBe("۱۰٫۵");
+});
+
