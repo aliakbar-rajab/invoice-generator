@@ -35,7 +35,7 @@ export const COMPANIES = {
 export const COMPANY_ORDER = ["fouladBonyan", "karaBorjParseh"];
 
 export function getCompany(key) {
-  return Object.prototype.hasOwnProperty.call(COMPANIES, key) ? COMPANIES[key] : null;
+  return COMPANIES[key] ?? null;
 }
 
 // User-typed company name ("ورود نام شرکت" at /start). Internally tagged with

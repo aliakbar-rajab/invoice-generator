@@ -63,10 +63,6 @@ export function normalizeStrictNumber(raw) {
   return fracPart ? sign + plainInt + "." + fracPart : sign + plainInt;
 }
 
-export function normalizeNumericInput(value) {
-  return normalizeStrictNumber(value);
-}
-
 export function parseDecimalToBigIntScaled(value, decimals) {
   const normalized = normalizeStrictNumber(value);
   if (normalized === null || normalized === "") return 0n;
@@ -101,14 +97,7 @@ export function bigRoundDiv(numerator, denominator) {
 }
 
 export function groupDigits(digitsAscii, sep) {
-  let out = "";
-  let count = 0;
-  for (let i = digitsAscii.length - 1; i >= 0; i -= 1) {
-    out = digitsAscii.charAt(i) + out;
-    count += 1;
-    if (count % 3 === 0 && i !== 0) out = sep + out;
-  }
-  return out;
+  return digitsAscii.replace(/\B(?=(\d{3})+(?!\d))/g, sep);
 }
 
 export function parseMoneyBig(value) {

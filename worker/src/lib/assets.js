@@ -16,16 +16,6 @@ function extOf(path) {
   return match ? match[1].toLowerCase() : "";
 }
 
-function arrayBufferToBase64(buffer) {
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
-  }
-  return btoa(binary);
-}
-
 export async function loadDataUri(env, path) {
   const response = await env.ASSETS.fetch(new URL(path, "http://assets.local"));
   if (!response.ok) {
@@ -33,5 +23,5 @@ export async function loadDataUri(env, path) {
   }
   const buffer = await response.arrayBuffer();
   const mime = MIME_BY_EXT[extOf(path)] || "application/octet-stream";
-  return `data:${mime};base64,${arrayBufferToBase64(buffer)}`;
+  return `data:${mime};base64,${Buffer.from(buffer).toString("base64")}`;
 }

@@ -39,7 +39,7 @@ The multi-page A4 document pagination and spacing engine.
 
 ### View Adapter (`آداپتور نمایشگر`)
 The presentation layer interfacing between the user and domain modules.
-- **Browser DOM Shell**: Captures DOM input events, contenteditable inputs, and keyboard shortcuts, translating them into operations on the `InvoiceDocument` and `DocumentStore` modules.
+- **Browser DOM Shell**: Standalone offline client (`app.js` and `persian-numbers.js`) orchestrating UI events, document persistence, arithmetic, and layout rhythm directly.
 - **Telegram Bot / Worker Adapter**: Cloudflare Worker runtime translating Telegram bot webhook messages and callback queries into invoice document builds and PDF renders.
 
 ---

@@ -74,10 +74,6 @@ function normalizeStrictNumber(raw) {
   return fracPart ? sign + plainInt + "." + fracPart : sign + plainInt;
 }
 
-function normalizeNumericInput(value) {
-  return normalizeStrictNumber(value);
-}
-
 // Parses a numeric string into a BigInt scaled by 10^decimals (e.g.
 // decimals=3 turns "2.755" into 2755n), rounding half-up on any digits
 // beyond that precision. Every digit of the integer part is carried through
@@ -121,18 +117,8 @@ function bigRoundDiv(numerator, denominator) {
   return negResult ? -result : result;
 }
 
-// Groups an ASCII digit string into 3s from the right with `sep`, e.g.
-// "1234567" -> "1٬234٬567". Pure string manipulation on the BigInt's own
-// exact decimal representation — no length limit.
 function groupDigits(digitsAscii, sep) {
-  var out = "";
-  var count = 0;
-  for (var i = digitsAscii.length - 1; i >= 0; i -= 1) {
-    out = digitsAscii.charAt(i) + out;
-    count += 1;
-    if (count % 3 === 0 && i !== 0) out = sep + out;
-  }
-  return out;
+  return digitsAscii.replace(/\B(?=(\d{3})+(?!\d))/g, sep);
 }
 
 // ---------- Money (integer Rial, no fractional subunit) ----------
@@ -162,8 +148,7 @@ function formatQtyMilli(value) {
   var v = value || 0n;
   var neg = v < 0n;
   var abs = neg ? -v : v;
-  var intPart = abs / 100n; // wait, abs / 1000n!
-  intPart = abs / 1000n;
+  var intPart = abs / 1000n;
   var fracPart = abs % 1000n;
   var out = groupDigits(intPart.toString(), GROUP_SEP);
   if (fracPart !== 0n) {
@@ -254,25 +239,26 @@ function rialToWordsBig(value) {
   return (neg ? "منفی " : "") + groups.join(" و ") + " ریال";
 }
 
+var PersianNumbers = {
+  toPersianDigits: toPersianDigits,
+  toAsciiDigits: toAsciiDigits,
+  normalizeStrictNumber: normalizeStrictNumber,
+  parseDecimalToBigIntScaled: parseDecimalToBigIntScaled,
+  bigRoundDiv: bigRoundDiv,
+  groupDigits: groupDigits,
+  parseMoneyBig: parseMoneyBig,
+  parseQtyMilli: parseQtyMilli,
+  parsePercentBps: parsePercentBps,
+  formatBigRial: formatBigRial,
+  formatQtyMilli: formatQtyMilli,
+  formatPercentBps: formatPercentBps,
+  threeDigitsToWords: threeDigitsToWords,
+  scaleWordForGroup: scaleWordForGroup,
+  rialToWordsBig: rialToWordsBig,
+};
+
 if (typeof window !== "undefined") {
-  window.PersianNumbers = {
-    toPersianDigits: toPersianDigits,
-    toAsciiDigits: toAsciiDigits,
-    normalizeStrictNumber: normalizeStrictNumber,
-    normalizeNumericInput: normalizeNumericInput,
-    parseDecimalToBigIntScaled: parseDecimalToBigIntScaled,
-    bigRoundDiv: bigRoundDiv,
-    groupDigits: groupDigits,
-    parseMoneyBig: parseMoneyBig,
-    parseQtyMilli: parseQtyMilli,
-    parsePercentBps: parsePercentBps,
-    formatBigRial: formatBigRial,
-    formatQtyMilli: formatQtyMilli,
-    formatPercentBps: formatPercentBps,
-    threeDigitsToWords: threeDigitsToWords,
-    scaleWordForGroup: scaleWordForGroup,
-    rialToWordsBig: rialToWordsBig,
-  };
+  window.PersianNumbers = PersianNumbers;
 }
 
 if (typeof module !== "undefined" && module.exports) {
@@ -280,7 +266,6 @@ if (typeof module !== "undefined" && module.exports) {
     toPersianDigits: toPersianDigits,
     toAsciiDigits: toAsciiDigits,
     normalizeStrictNumber: normalizeStrictNumber,
-    normalizeNumericInput: normalizeNumericInput,
     parseDecimalToBigIntScaled: parseDecimalToBigIntScaled,
     bigRoundDiv: bigRoundDiv,
     groupDigits: groupDigits,
