@@ -150,7 +150,10 @@ test("the seventeenth item starts a second sheet, numbered and carrying the clos
       hasParties: !!sheet.querySelector(".inv-parties"),
       hasContinuationHead: !!sheet.querySelector(".print-continuation-head"),
       hasClosingBlock: !!sheet.querySelector(".inv-summary"),
-      pageNumber: sheet.querySelector(".print-page-number")?.textContent ?? null,
+      pageNumber:
+        sheet.querySelector(".print-page-number")?.textContent ??
+        sheet.querySelector(".print-continuation-meta div:last-child")?.textContent?.match(/صفحه .* از .*$/)?.[0] ??
+        null,
       lastRowNumber: sheet.querySelector("tbody tr:last-child .row-index-badge")?.textContent ?? null,
     }));
   });
