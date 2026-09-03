@@ -404,6 +404,15 @@
         <button type="button" id="btn-company-logo" class="settings-action">انتخاب لوگو</button>
         <input type="file" id="company-logo-file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden />
       </div>
+      <div class="company-logo-control">
+        <span class="company-logo-preview">
+          <img id="company-stamp-preview" alt="پیش‌نمایش مهر شرکت" hidden />
+          <span id="company-stamp-empty">بدون مهر</span>
+        </span>
+        <span class="company-logo-copy"><strong>مهر شرکت</strong><small id="company-stamp-status">PNG، JPG، WebP یا SVG</small></span>
+        <button type="button" id="btn-company-stamp" class="settings-action">انتخاب مهر</button>
+        <input type="file" id="company-stamp-file" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden />
+      </div>
       <p class="company-editor-error" id="company-editor-error" role="alert" hidden></p>
       <div class="app-dialog-actions">
         <button type="button" id="btn-company-editor-reset" class="danger" title="حذف تغییرات ذخیره‌شده و بازگشت به مشخصات اصلی برنامه" hidden>بازگردانی به پیش‌فرض</button>

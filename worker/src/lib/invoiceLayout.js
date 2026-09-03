@@ -185,7 +185,8 @@ export function layoutInvoicePages(options) {
     let guard = MAX_ROWS + 1;
     while (rowsOf(page).length > MIN_ROWS_PER_PAGE && guard > 0) {
       const isLast = index === pages().length - 1;
-      if (fitPage(page, rowsOf(page).length, isLast && pages().length === 1)) break;
+      const count = rowsOf(page).length;
+      if (count <= MAX_ROWS && fitPage(page, count, isLast && pages().length === 1)) break;
       const next = pages()[index + 1] || makeContinuationPage(page);
       const rows = rowsOf(page);
       sheetOf(next).insertBefore(rows[rows.length - 1], sheetOf(next).firstChild);

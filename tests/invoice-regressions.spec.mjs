@@ -1203,3 +1203,98 @@ test("a document that throws while applying reports it instead of rejecting sile
   await page.locator("#app-dialog-actions button").first().click();
   expect(await page.evaluate(() => window.__rejections || [])).toEqual([]);
 });
+
+test("printing commits the daily invoice number sequence and names the print title with number and buyer", async ({ page }) => {
+  await openApp(page);
+  await fillValidFirstRow(page);
+  await page.getByLabel("نام خریدار", { exact: true }).fill("شرکت آزمون");
+
+  let printedTitle = "";
+  await page.exposeFunction("recordPrintTitle", (t) => { printedTitle = t; });
+  await page.evaluate(() => {
+    const origPrint = window.print;
+    window.print = () => {
+      window.recordPrintTitle(document.title);
+      if (origPrint) origPrint();
+    };
+  });
+
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(1);
+
+  expect(printedTitle).toMatch(/^پیش‌فاکتور_\d{8}-\d{3}_شرکت-آزمون$/);
+
+  const seqRaw = await page.evaluate(() => localStorage.getItem("pishFaktor.dailySeq.fouladBonyan"));
+  expect(seqRaw).toBeTruthy();
+  const seq = JSON.parse(seqRaw);
+  expect(seq.n).toBe(1);
+  expect(seq.day).toMatch(/^\d{8}$/);
+});
+
+test("deleteSavedEntry cleanly removes from legacy SAVED_LIST_KEY storage", async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => {
+    const entry = {
+      id: "inv-legacy-test",
+      name: "فاکتور قدیمی",
+      savedAt: 1700000000000,
+      data: {
+        version: 7,
+        meta: { number: "۱۴۰۰۰۱۰۱-۰۰۱" },
+        buyer: { name: "مشتری قدیمی" },
+        seller: {},
+        company: { profile: "fouladBonyan" },
+        items: []
+      }
+    };
+    localStorage.setItem("preinvoice.saved.entry.v2.inv-legacy-test", JSON.stringify(entry));
+    localStorage.setItem("preinvoice.saved.v1", JSON.stringify({ "inv-legacy-test": entry }));
+  });
+
+  await page.locator("#btn-saved-list").click();
+  await expect(page.locator("#saved-panel")).toBeVisible();
+  await expect(page.locator(".saved-item-name")).toHaveText(["فاکتور قدیمی"]);
+  await page.locator(".saved-item-actions button.danger").first().click();
+  await expect(page.locator("#app-dialog")).toBeVisible();
+  await page.locator("#app-dialog-actions button.danger").click();
+  await expect(page.locator("#toolbar-status")).toContainText("حذف شد");
+
+  const storageAfter = await page.evaluate(() => ({
+    v2: localStorage.getItem("preinvoice.saved.entry.v2.inv-legacy-test"),
+    legacy: localStorage.getItem("preinvoice.saved.v1")
+  }));
+  expect(storageAfter.v2).toBeNull();
+  expect(storageAfter.legacy === null || Object.keys(JSON.parse(storageAfter.legacy)).length === 0).toBe(true);
+});
+
+test("company editor allows setting and persisting a permanent company stamp on user-created companies", async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => {
+    document.getElementById("btn-settings").click();
+    document.getElementById("btn-company-editor").click();
+  });
+  await expect(page.locator("#company-editor-dialog")).toBeVisible();
+  await page.locator("#company-editor-name").fill("شرکت مهرساز");
+
+  // Select a 1x1 valid PNG for stamp
+  const validPngBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+  const pngBytes = Buffer.from(validPngBase64, "base64");
+  await page.evaluate(({ bytes }) => {
+    const file = new File([new Uint8Array(bytes)], "stamp.png", { type: "image/png" });
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    const input = document.getElementById("company-stamp-file");
+    input.files = transfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, { bytes: Array.from(pngBytes) });
+
+  await expect(page.locator("#company-stamp-preview")).toBeVisible();
+  await page.locator("#btn-company-editor-submit").click();
+  await expect(page.locator("#company-editor-dialog")).toBeHidden();
+
+  const profiles = await page.evaluate(() => JSON.parse(localStorage.getItem("preinvoice.companyProfiles.v1") || "{}"));
+  const created = Object.values(profiles).find((p) => p.name === "شرکت مهرساز");
+  expect(created).toBeTruthy();
+  expect(created.stamp).toMatch(/^data:image\//);
+});
+

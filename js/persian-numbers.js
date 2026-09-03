@@ -36,11 +36,41 @@ var GROUP_SEP = "٬"; // ٬ Arabic thousands separator (matches fa-IR grouping)
 var DECIMAL_SEP = "٫"; // ٫ Arabic decimal separator (matches fa-IR decimal point)
 
 // Normalizes a user-typed numeric string to ASCII digits with a plain "."
-// decimal point and no grouping separators, so it can be matched with a
-// simple regex. Handles both punctuation conventions the app itself ever
-// produces (ASCII "," / Persian "٬" for grouping, ASCII "." / Persian "٫"
-// for the decimal point) as well as raw keyboard input.
+// decimal point, rejecting malformed grouping separators (such as "1,5" or "12,34").
+function normalizeStrictNumber(raw) {
+  if (raw === null || raw === undefined) return null;
+  var text = toAsciiDigits(String(raw).trim());
+  if (!text) return "";
+  var sign = text.indexOf("-") === 0 ? "-" : "";
+  var unsigned = sign ? text.slice(1) : text;
+  if (!unsigned) return null;
+
+  var intPart = unsigned;
+  var fracPart = "";
+  var decimalMatch = unsigned.match(/^([^.٫]*)[.٫](.*)$/);
+  if (decimalMatch) {
+    intPart = decimalMatch[1];
+    fracPart = decimalMatch[2];
+    if (intPart.indexOf(".") !== -1 || intPart.indexOf("٫") !== -1 || fracPart.indexOf(".") !== -1 || fracPart.indexOf("٫") !== -1) {
+      return null;
+    }
+  }
+
+  if (fracPart && !/^\d+$/.test(fracPart)) return null;
+
+  var plainInt = intPart;
+  if (/[, ٬]/.test(intPart)) {
+    if (!/^\d{1,3}(?:[, ٬]\d{3})+$/.test(intPart)) return null;
+    plainInt = intPart.replace(/[, ٬]/g, "");
+  }
+  if (!/^\d+$/.test(plainInt)) return null;
+
+  return fracPart ? sign + plainInt + "." + fracPart : sign + plainInt;
+}
+
 function normalizeNumericInput(value) {
+  var strict = normalizeStrictNumber(value);
+  if (strict !== null) return strict;
   if (value === null || value === undefined) return "";
   return toAsciiDigits(String(value))
     .replace(/[,\s٬]/g, "")
@@ -54,7 +84,8 @@ function normalizeNumericInput(value) {
 // exactly — unlike parseFloat/Number, there is no point at which precision
 // is silently lost for a very large value.
 function parseDecimalToBigIntScaled(value, decimals) {
-  var normalized = normalizeNumericInput(value).replace(/[^0-9.\-]/g, "");
+  var normalized = normalizeStrictNumber(value);
+  if (normalized === null || normalized === "") return 0n;
   var match = normalized.match(/^(-?)(\d*)(?:\.(\d*))?$/);
   if (!match) return 0n;
 
@@ -227,4 +258,20 @@ function rialToWordsBig(value) {
   }
 
   return (neg ? "منفی " : "") + groups.join(" و ") + " ریال";
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    toPersianDigits: toPersianDigits,
+    toAsciiDigits: toAsciiDigits,
+    normalizeStrictNumber: normalizeStrictNumber,
+    normalizeNumericInput: normalizeNumericInput,
+    parseDecimalToBigIntScaled: parseDecimalToBigIntScaled,
+    bigRoundDiv: bigRoundDiv,
+    parseMoneyBig: parseMoneyBig,
+    parseQtyMilli: parseQtyMilli,
+    formatBigRial: formatBigRial,
+    formatQtyMilli: formatQtyMilli,
+    rialToWordsBig: rialToWordsBig,
+  };
 }

@@ -61,3 +61,25 @@ describe("buildInvoiceHtml items table", () => {
 		]);
 	});
 });
+
+describe("buildInvoiceHtml tax & totals", () => {
+	it("renders 10% tax and adds it to net total when specified", () => {
+		const html = buildInvoiceHtml(baseInvoiceData({
+			items: [{ description: "کالا", unit: "عدد", quantityMilli: 1000n, unitPriceRial: 1000000n }],
+			taxPercent: 10,
+		}));
+		expect(html).toContain("جمع کل</span><strong>۱٬۰۰۰٬۰۰۰ ریال</strong>");
+		expect(html).toContain("مالیات و عوارض (٪۱۰)</span><strong>۱۰۰٬۰۰۰ ریال</strong>");
+		expect(html).toContain("مبلغ قابل پرداخت</span><strong>۱٬۱۰۰٬۰۰۰ ریال</strong>");
+	});
+
+	it("renders 0% tax when tax is zero", () => {
+		const html = buildInvoiceHtml(baseInvoiceData({
+			items: [{ description: "کالا", unit: "عدد", quantityMilli: 1000n, unitPriceRial: 1000000n }],
+			taxPercent: 0,
+		}));
+		expect(html).toContain("مالیات و عوارض (٪۰)</span><strong>۰ ریال</strong>");
+		expect(html).toContain("مبلغ قابل پرداخت</span><strong>۱٬۰۰۰٬۰۰۰ ریال</strong>");
+	});
+});
+

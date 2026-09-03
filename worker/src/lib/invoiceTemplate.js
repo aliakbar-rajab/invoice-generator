@@ -49,13 +49,16 @@ function chunkItems(lines, perPage) {
 
 // Computes per-item and invoice-level totals as exact BigInt Rial amounts.
 // quantityMilli/unitPriceRial are already-parsed BigInts (see persianNumbers).
-export function computeTotals(items) {
+export function computeTotals(items, taxPercent = 0) {
   const lines = items.map((item) => {
     const lineTotal = bigRoundDiv(item.quantityMilli * item.unitPriceRial, 1000n);
     return { ...item, lineTotal };
   });
   const grossTotal = lines.reduce((sum, l) => sum + l.lineTotal, 0n);
-  return { lines, grossTotal, taxTotal: 0n, netTotal: grossTotal };
+  const taxBasisPoints = BigInt(Math.round(Number(taxPercent || 0) * 100));
+  const taxTotal = bigRoundDiv(grossTotal * taxBasisPoints, 10000n);
+  const netTotal = grossTotal + taxTotal;
+  return { lines, grossTotal, taxTotal, netTotal };
 }
 
 function partyField(label, value, ltr) {
@@ -120,8 +123,9 @@ export function buildInvoiceHtml(data) {
     buyerPhone,
     items,
     includeStamp,
+    taxPercent = 0,
   } = data;
-  const { lines, grossTotal, taxTotal, netTotal } = computeTotals(items);
+  const { lines, grossTotal, taxTotal, netTotal } = computeTotals(items, taxPercent);
 
   const logoImg = company.logoDataUri
     ? `<img class="inv-logo" alt="آرم شرکت" src="${company.logoDataUri}" />`
@@ -207,7 +211,7 @@ export function buildInvoiceHtml(data) {
   const closingBlock = `<section class="inv-summary">
     <div class="inv-totals">
       <div><span>جمع کل</span><strong>${formatBigRial(grossTotal)} ریال</strong></div>
-      <div><span>مالیات و عوارض (٪۰)</span><strong>${formatBigRial(taxTotal)} ریال</strong></div>
+      <div><span>مالیات و عوارض (٪${toPersianDigits(taxPercent)})</span><strong>${formatBigRial(taxTotal)} ریال</strong></div>
       <div class="inv-total-final"><span>مبلغ قابل پرداخت</span><strong>${formatBigRial(netTotal)} ریال</strong></div>
     </div>
     <section class="inv-amount-words">

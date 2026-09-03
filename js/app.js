@@ -73,6 +73,7 @@
   var stampAvailable = false;
   var lastProfileKey = null;
   var pendingCompanyLogoData = "";
+  var pendingCompanyStampData = "";
   var companyEditorMode = "create";
   var companyEditorProfileKey = null;
   // The catch-all «سایر» profile is document-scoped rather than a reusable
@@ -245,6 +246,10 @@
   var companyLogoPreviewEl = document.getElementById("company-logo-preview");
   var companyLogoEmptyEl = document.getElementById("company-logo-empty");
   var companyLogoStatusEl = document.getElementById("company-logo-status");
+  var companyStampFileEl = document.getElementById("company-stamp-file");
+  var companyStampPreviewEl = document.getElementById("company-stamp-preview");
+  var companyStampEmptyEl = document.getElementById("company-stamp-empty");
+  var companyStampStatusEl = document.getElementById("company-stamp-status");
   var companyEditorErrorEl = document.getElementById("company-editor-error");
 
   // A failed image load (e.g. a profile added without its stamp file yet)
@@ -791,7 +796,7 @@
       // A fresh Date every time: callers advance the result by a day.
       return hit === null ? null : new Date(hit);
     }
-    var monthLenEstimate = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 30];
+    var monthLenEstimate = [31, 31, 31, 31, 31, 31, 30, 30, 30, 30, 30, 29];
     var dayOfYear = d;
     for (var i = 0; i < m - 1; i += 1) dayOfYear += monthLenEstimate[i];
     var seed = new Date(y + 621, 2, 21);
@@ -1252,6 +1257,25 @@
     }
   }
 
+  function setCompanyStampPreview(src, label) {
+    pendingCompanyStampData = src || "";
+    if (pendingCompanyStampData) {
+      if (companyStampPreviewEl) {
+        companyStampPreviewEl.src = pendingCompanyStampData;
+        companyStampPreviewEl.hidden = false;
+      }
+      if (companyStampEmptyEl) companyStampEmptyEl.hidden = true;
+      if (companyStampStatusEl) companyStampStatusEl.textContent = label || "مهر آمادهٔ ثبت است.";
+    } else {
+      if (companyStampPreviewEl) {
+        companyStampPreviewEl.hidden = true;
+        companyStampPreviewEl.removeAttribute("src");
+      }
+      if (companyStampEmptyEl) companyStampEmptyEl.hidden = false;
+      if (companyStampStatusEl) companyStampStatusEl.textContent = "PNG، JPG، WebP یا SVG";
+    }
+  }
+
   function resizeImageFile(file, maxDimension) {
     return new Promise(function (resolve, reject) {
       if (!file || !/^image\//i.test(file.type || "")) {
@@ -1305,6 +1329,7 @@
     companyEditorDialogEl.hidden = true;
     companyEditorErrorEl.hidden = true;
     companyLogoFileEl.value = "";
+    if (companyStampFileEl) companyStampFileEl.value = "";
   }
 
   function setCompanyEditorFieldValue(field, value) {
@@ -1331,11 +1356,14 @@
       setCompanyEditorFieldValue(companyEditorWebsiteEl, document.querySelector('[data-field="company.website"]').value);
       var currentLogo = adHoc ? adHocCompanyAssets.logo : profile.logo;
       setCompanyLogoPreview(currentLogo, currentLogo ? "لوگوی فعلی شرکت" : "");
+      var currentStamp = adHoc ? adHocCompanyAssets.stamp : profile.stamp;
+      setCompanyStampPreview(currentStamp, currentStamp ? "مهر فعلی شرکت" : "");
     } else {
       [companyEditorNameEl, companyEditorNationalIdEl, companyEditorPostalCodeEl,
         companyEditorAddressEl, companyEditorPhonesEl, companyEditorWebsiteEl]
         .forEach(function (field) { setCompanyEditorFieldValue(field, ""); });
       setCompanyLogoPreview("", "");
+      setCompanyStampPreview("", "");
     }
     companyEditorTitleEl.textContent = editingExisting ? "ویرایش شرکت فعلی" : "ثبت شرکت جدید";
     companyEditorDescriptionEl.textContent = editingExisting
@@ -1380,7 +1408,7 @@
       // only mean "the user did not pick a new one" — never "delete the one
       // this company already has".
       logo: pendingCompanyLogoData || (editingExisting ? previousProfile.logo : ""),
-      stamp: editingExisting ? previousProfile.stamp : "",
+      stamp: pendingCompanyStampData || (editingExisting ? previousProfile.stamp : ""),
       nationalId: toPersianDigits(companyEditorNationalIdEl.value.trim()),
       address: companyEditorAddressEl.value.trim(),
       postalCode: toPersianDigits(companyEditorPostalCodeEl.value.trim()),
@@ -1391,8 +1419,9 @@
     COMPANY_PROFILES[profileKey] = profile;
     try {
       persistProfileDetails(profileKey);
-      if (editingExisting && !profile.userCreated && profile.logo !== previousProfile.logo) {
-        persistProfileAsset(profileKey, "logo", profile.logo);
+      if (editingExisting && !profile.userCreated) {
+        if (profile.logo !== previousProfile.logo) persistProfileAsset(profileKey, "logo", profile.logo);
+        if (profile.stamp !== previousProfile.stamp) persistProfileAsset(profileKey, "stamp", profile.stamp);
       }
     } catch (err) {
       if (previousProfile) COMPANY_PROFILES[profileKey] = previousProfile;
@@ -2170,7 +2199,7 @@
       items: [],
     };
 
-    document.querySelectorAll("[data-field]").forEach(function (el) {
+    sheet.querySelectorAll("[data-field]").forEach(function (el) {
       var value = el.isContentEditable ? el.textContent.trim() : el.value;
       setPath(data, el.getAttribute("data-field"), value);
     });
@@ -2395,6 +2424,22 @@
 
   function removeSavedEntry(id) {
     localStorage.removeItem(SAVED_ENTRY_PREFIX + id);
+    try {
+      var raw = localStorage.getItem(SAVED_LIST_KEY);
+      if (raw) {
+        var legacy = readLegacySavedList();
+        if (legacy && Object.prototype.hasOwnProperty.call(legacy, id)) {
+          delete legacy[id];
+          if (Object.keys(legacy).length === 0) {
+            localStorage.removeItem(SAVED_LIST_KEY);
+          } else {
+            localStorage.setItem(SAVED_LIST_KEY, JSON.stringify(legacy));
+          }
+        }
+      }
+    } catch (err) {
+      /* ignore storage cleanup errors */
+    }
   }
 
   function migrateSavedListStorage() {
@@ -2873,7 +2918,7 @@
         replacement.textContent = field.value || "";
       }
       Array.prototype.slice.call(field.attributes).forEach(function (attr) {
-        if (attr.name.indexOf("data-") === 0) replacement.setAttribute(attr.name, attr.value);
+        if (attr.name.indexOf("data-") === 0 && attr.name !== "data-field") replacement.setAttribute(attr.name, attr.value);
       });
       field.replaceWith(replacement);
     });
@@ -3455,19 +3500,19 @@
     if (plan.chunks.length > 1) warnings.push("این پیش‌فاکتور در " + toPersianDigits(plan.chunks.length) + " صفحه چاپ می‌شود");
     renderOutputWarnings(warnings);
 
-    renderPrintPlan(realized.pages);
     var data = collectInvoiceData();
     commitInvoiceNumber(data.company.profile, data.meta.number);
     numberIsAutoSuggested = false;
     dateIsAutoSuggested = false;
     validityIsAutoSuggested = false;
 
+    renderPrintPlan(realized.pages);
+
     var oldTitle = document.title;
-    var dataForName = collectInvoiceData();
     document.title = [
       "پیش‌فاکتور",
-      safeFilenamePart(dataForName.meta.number),
-      safeFilenamePart(dataForName.buyer.name || dataForName.company.name || resolveProfile(dataForName.company.profile).label),
+      safeFilenamePart(data.meta.number),
+      safeFilenamePart(data.buyer.name || data.company.name || resolveProfile(data.company.profile).label),
     ].filter(Boolean).join("_");
     window.setTimeout(function () {
       window.print();
@@ -3782,6 +3827,30 @@
         companyEditorErrorEl.hidden = false;
       }
     });
+
+    var companyStampBtn = document.getElementById("btn-company-stamp");
+    if (companyStampBtn && companyStampFileEl) {
+      companyStampBtn.addEventListener("click", function () {
+        companyStampFileEl.click();
+      });
+      companyStampFileEl.addEventListener("change", async function () {
+        var file = this.files && this.files[0];
+        this.value = "";
+        if (!file) return;
+        var previousStampData = pendingCompanyStampData;
+        var previousStampLabel = companyStampStatusEl.textContent;
+        companyEditorErrorEl.hidden = true;
+        companyStampStatusEl.textContent = "در حال آماده‌سازی مهر…";
+        try {
+          var dataUrl = await resizeImageFile(file, 720);
+          setCompanyStampPreview(dataUrl, file.name + " · بهینه‌شده برای چاپ");
+        } catch (err) {
+          setCompanyStampPreview(previousStampData, previousStampData ? previousStampLabel : "");
+          companyEditorErrorEl.textContent = err.message || "افزودن مهر ممکن نشد.";
+          companyEditorErrorEl.hidden = false;
+        }
+      });
+    }
 
     [temporaryLogoBtnEl, temporaryLogoSettingsBtnEl].forEach(function (button) {
       if (button) button.addEventListener("click", function () {

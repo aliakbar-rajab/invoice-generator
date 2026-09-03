@@ -339,11 +339,11 @@ export class InvoiceSession extends DurableObject {
     if (state.items.length >= MAX_ITEMS) {
       await sendMessage(token, chatId, `❗️حداکثر ${toPersianDigits(MAX_ITEMS)} قلم کالا در هر فاکتور مجاز است.`);
       const next = this.advance(state, (s) => {
-        s.step = "item_more";
+        s.step = "ask_stamp";
         return s;
       });
       await this.saveState(next);
-      await this.promptItemMore(chatId, token);
+      await this.promptStamp(chatId, token);
       return;
     }
 
@@ -359,7 +359,7 @@ export class InvoiceSession extends DurableObject {
     });
     await this.saveState(next);
     await this.sendItemAddedSummary(chatId, token, next);
-    await this.promptItemMore(chatId, token);
+    await this.promptItemMore(chatId, token, next);
   }
 
   async sendItemAddedSummary(chatId, token, state) {
@@ -467,6 +467,16 @@ export class InvoiceSession extends DurableObject {
     }
 
     if (data === "additem:yes" && state.step === "item_more") {
+      if (state.items.length >= MAX_ITEMS) {
+        await sendMessage(token, chatId, `❗️حداکثر ${toPersianDigits(MAX_ITEMS)} قلم کالا در هر فاکتور مجاز است.`);
+        state = this.advance(state, (s) => {
+          s.step = "ask_stamp";
+          return s;
+        });
+        await this.saveState(state);
+        await this.promptStamp(chatId, token);
+        return;
+      }
       state = this.advance(state, (s) => {
         s.step = "item_description";
         return s;
@@ -555,7 +565,18 @@ export class InvoiceSession extends DurableObject {
     });
   }
 
-  async promptItemMore(chatId, token) {
+  async promptItemMore(chatId, token, state) {
+    const currentState = state || (await this.loadState());
+    if (currentState && currentState.items && currentState.items.length >= MAX_ITEMS) {
+      await sendMessage(token, chatId, `❗️به حداکثر تعداد مجاز (${toPersianDigits(MAX_ITEMS)} قلم کالا) رسیدید.`);
+      const next = this.advance(currentState, (s) => {
+        s.step = "ask_stamp";
+        return s;
+      });
+      await this.saveState(next);
+      await this.promptStamp(chatId, token);
+      return;
+    }
     await sendMessage(token, chatId, "➕ آیتم دیگری اضافه می‌کنید؟", {
       reply_markup: inlineKeyboard([
         [
@@ -677,9 +698,10 @@ export class InvoiceSession extends DurableObject {
       const docDate = jalaliParts.map((p) => p.value).join("");
 
       const asciiYear = toAsciiDigits(jalaliYear);
+      const counterCompanyKey = state.companyKey === OTHER_COMPANY_KEY ? `other:${chatId}` : state.companyKey;
       const counterStub = this.env.INVOICE_COUNTER.getByName("global");
-      const seq = await counterStub.next(state.companyKey, asciiYear);
-      reserved = { companyKey: state.companyKey, yearKey: asciiYear, value: seq };
+      const seq = await counterStub.next(counterCompanyKey, asciiYear);
+      reserved = { companyKey: counterCompanyKey, yearKey: asciiYear, value: seq };
       const docNumber = `${jalaliYear}-${toPersianDigits(String(seq).padStart(3, "0"))}`;
 
       const items = state.items.map((it) => ({
@@ -702,10 +724,12 @@ export class InvoiceSession extends DurableObject {
         buyerPhone: state.buyerPhone,
         items,
         includeStamp: !!state.includeStamp,
+        taxPercent: state.taxPercent !== undefined ? state.taxPercent : 10,
       });
 
       const pdfBytes = await renderInvoicePdf(this.env, html);
-      const filename = `invoice-${state.companyKey}-${asciiYear}-${String(seq).padStart(3, "0")}.pdf`;
+      const companySlug = state.companyKey === OTHER_COMPANY_KEY ? "other" : state.companyKey;
+      const filename = `invoice-${companySlug}-${asciiYear}-${String(seq).padStart(3, "0")}.pdf`;
 
       await sendDocument(token, chatId, pdfBytes, filename, "🎉 پیش‌فاکتور شما آماده است.");
       await this.saveState(freshState());
