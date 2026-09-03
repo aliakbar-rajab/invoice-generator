@@ -194,8 +194,9 @@ export class InvoiceSession extends DurableObject {
     if (text.startsWith("/tax") || text.startsWith("/maliat")) {
       const parts = text.split(/\s+/);
       if (parts.length > 1) {
-        const rateStr = toAsciiDigits(parts[1]).trim().replace(/٫/g, ".");
-        const validRate = /^\d+(?:\.\d{1,2})?$/.test(rateStr);
+        let rateStr = toAsciiDigits(parts[1]).trim().replace(/٫/g, ".");
+        const validRate = /^(?:\d+|\d*\.\d{1,2})$/.test(rateStr) && rateStr !== ".";
+        if (rateStr.startsWith(".")) rateStr = "0" + rateStr;
         const num = parseFloat(rateStr);
         if (validRate && !Number.isNaN(num) && Number.isFinite(num) && num >= 0 && num <= 100) {
           state = this.advance(state, (s) => {

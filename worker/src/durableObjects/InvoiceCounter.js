@@ -11,10 +11,12 @@ import { DurableObject } from "cloudflare:workers";
 export class InvoiceCounter extends DurableObject {
   async next(companyKey, yearKey) {
     const key = `seq:${companyKey}:${yearKey}`;
-    const current = (await this.ctx.storage.get(key)) || 0;
-    const nextValue = current + 1;
-    await this.ctx.storage.put(key, nextValue);
-    return nextValue;
+    return await this.ctx.blockConcurrencyWhile(async () => {
+      const current = (await this.ctx.storage.get(key)) || 0;
+      const nextValue = current + 1;
+      await this.ctx.storage.put(key, nextValue);
+      return nextValue;
+    });
   }
 
   /**
@@ -32,9 +34,11 @@ export class InvoiceCounter extends DurableObject {
    */
   async release(companyKey, yearKey, value) {
     const key = `seq:${companyKey}:${yearKey}`;
-    const current = (await this.ctx.storage.get(key)) || 0;
-    if (current !== value) return false;
-    await this.ctx.storage.put(key, value - 1);
-    return true;
+    return await this.ctx.blockConcurrencyWhile(async () => {
+      const current = (await this.ctx.storage.get(key)) || 0;
+      if (current !== value) return false;
+      await this.ctx.storage.put(key, value - 1);
+      return true;
+    });
   }
 }

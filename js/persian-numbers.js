@@ -259,6 +259,7 @@ var PersianNumbers = {
 
 if (typeof window !== "undefined") {
   window.PersianNumbers = PersianNumbers;
+  window.normalizeStrictNumber = normalizeStrictNumber;
 }
 
 if (typeof module !== "undefined" && module.exports) {

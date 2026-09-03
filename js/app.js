@@ -1004,7 +1004,14 @@
     var next = 1;
     try {
       var saved = JSON.parse(localStorage.getItem(key) || "null");
-      if (saved && saved.day === datePart) next = (saved.n || 0) + 1;
+      if (saved) {
+        if (saved.days && typeof saved.days === "object") {
+          if (saved.days[datePart] != null) next = (saved.days[datePart] || 0) + 1;
+          else if (saved.day === datePart) next = (saved.n || 0) + 1;
+        } else if (saved.day === datePart) {
+          next = (saved.n || 0) + 1;
+        }
+      }
     } catch (err) {
       next = 1;
     }
@@ -1024,8 +1031,26 @@
     var key = SEQ_KEY_PREFIX + (COMPANY_PROFILES[profileKey] ? profileKey : DEFAULT_PROFILE_KEY);
     try {
       var saved = JSON.parse(localStorage.getItem(key) || "null");
-      if (!saved || saved.day !== day || (saved.n || 0) < n) {
-        localStorage.setItem(key, JSON.stringify({ day: day, n: n }));
+      var days = {};
+      if (saved && typeof saved === "object") {
+        if (saved.days && typeof saved.days === "object") {
+          days = Object.assign({}, saved.days);
+        } else if (saved.day && typeof saved.n === "number") {
+          days[saved.day] = saved.n;
+        }
+      }
+      var prevForDay = days[day] || 0;
+      if (prevForDay < n) {
+        days[day] = n;
+        var currentDay = (saved && saved.day) || day;
+        var currentN = (saved && saved.n) || n;
+        if (day === currentDay) {
+          currentN = Math.max(currentN, n);
+        } else if (!saved || !saved.day) {
+          currentDay = day;
+          currentN = n;
+        }
+        localStorage.setItem(key, JSON.stringify({ day: currentDay, n: currentN, days: days }));
       }
     } catch (err) {
       // Storage can be disabled in private mode. Saving the invoice itself
@@ -1079,7 +1104,7 @@
       changed = true;
     }
     if (numberIsAutoSuggested && refreshLiveInvoiceNumber()) changed = true;
-    if (validityIsAutoSuggested && validityInput && validityModeEl.value !== "manual") {
+    if (validityInput && validityModeEl.value !== "manual") {
       var validity = resolveValidityValue(validityModeEl.value);
       if (validityInput.value !== validity) {
         validityInput.value = validity;
@@ -1463,7 +1488,11 @@
     syncStampVisibility();
     if (numberIsAutoSuggested) {
       var numberInput = document.querySelector('[data-field="meta.number"]');
-      if (numberInput) numberInput.value = suggestInvoiceNumber(profileKey, currentInvoiceDateValue());
+      if (numberInput) {
+        numberInput.value = suggestInvoiceNumber(profileKey, currentInvoiceDateValue());
+        fitNumericEl(numberInput);
+        updateDocumentIdentity();
+      }
     }
     isDirty = true;
     setStatus(editingExisting
@@ -1869,6 +1898,9 @@
   // apart: an empty tax rate legitimately means zero, while a malformed one
   // must never be quietly treated as one.
   function normalizeStrictNumber(value) {
+    if (typeof window !== "undefined" && window.PersianNumbers && typeof window.PersianNumbers.normalizeStrictNumber === "function") {
+      return window.PersianNumbers.normalizeStrictNumber(value);
+    }
     if (typeof window !== "undefined" && typeof window.normalizeStrictNumber === "function") {
       return window.normalizeStrictNumber(value);
     }
@@ -2212,7 +2244,11 @@
             // no longer a live suggestion — a later company switch must not
             // overwrite whatever they put there.
             if (field === "meta.number") numberIsAutoSuggested = false;
-            if (field === "meta.date") dateIsAutoSuggested = false;
+            if (field === "meta.date") {
+              dateIsAutoSuggested = false;
+              recalcAll({ skipStaticFit: false });
+              refreshValidityFromDate();
+            }
             if (field === "meta.validity") validityIsAutoSuggested = false;
             // The footer band is a single website field now; its is-empty
             // state (and the amount-in-words strip's) is derived centrally in
@@ -2980,6 +3016,7 @@
       } else {
         replacement.textContent = field.value || "";
       }
+      if (field.getAttribute("dir")) replacement.setAttribute("dir", field.getAttribute("dir"));
       Array.prototype.slice.call(field.attributes).forEach(function (attr) {
         if (attr.name.indexOf("data-") === 0 && attr.name !== "data-field") replacement.setAttribute(attr.name, attr.value);
       });
@@ -3766,7 +3803,11 @@
       syncStampVisibility();
       if (numberIsAutoSuggested) {
         var numberInput = document.querySelector('[data-field="meta.number"]');
-        if (numberInput) numberInput.value = suggestInvoiceNumber(nextKey, currentInvoiceDateValue());
+        if (numberInput) {
+          numberInput.value = suggestInvoiceNumber(nextKey, currentInvoiceDateValue());
+          fitNumericEl(numberInput);
+          updateDocumentIdentity();
+        }
       }
       isDirty = true;
       setStatus(isCustomProfile(nextKey) ? "نام و مشخصات شرکت را وارد کنید." : "شرکت صادرکننده تغییر کرد؛ سند دوباره نیاز به تأیید دارد.");
@@ -3851,7 +3892,11 @@
         syncStampVisibility();
         if (numberIsAutoSuggested) {
           var numberInput = document.querySelector('[data-field="meta.number"]');
-          if (numberInput) numberInput.value = suggestInvoiceNumber(profileKey, currentInvoiceDateValue());
+          if (numberInput) {
+            numberInput.value = suggestInvoiceNumber(profileKey, currentInvoiceDateValue());
+            fitNumericEl(numberInput);
+            updateDocumentIdentity();
+          }
         }
         isDirty = true;
         setStatus("مشخصات پیش‌فرض «" + pristine.label + "» بازگردانی شد.");
@@ -3890,7 +3935,11 @@
           syncStampVisibility();
           if (numberIsAutoSuggested) {
             var numberInput = document.querySelector('[data-field="meta.number"]');
-            if (numberInput) numberInput.value = suggestInvoiceNumber(DEFAULT_PROFILE_KEY, currentInvoiceDateValue());
+            if (numberInput) {
+              numberInput.value = suggestInvoiceNumber(DEFAULT_PROFILE_KEY, currentInvoiceDateValue());
+              fitNumericEl(numberInput);
+              updateDocumentIdentity();
+            }
           }
           isDirty = true;
         }

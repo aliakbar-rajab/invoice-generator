@@ -370,6 +370,18 @@ describe("bot-only regressions", () => {
 		const state = await readState(chatId);
 		expect(state.taxPercent).toBe(10); // remains default 10
 	});
+
+	it("accepts /tax with leading decimal like .5 and ٫۵", async () => {
+		const chatId = freshChatId();
+		await send(chatId, textUpdate(chatId, "/start", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "/tax .5", nextUpdateId()));
+		let state = await readState(chatId);
+		expect(state.taxPercent).toBe(0.5);
+
+		await send(chatId, textUpdate(chatId, "/tax ٫۲۵", nextUpdateId()));
+		state = await readState(chatId);
+		expect(state.taxPercent).toBe(0.25);
+	});
 });
 
 // ---------- Invoice numbering ----------
@@ -407,6 +419,17 @@ describe("InvoiceCounter", () => {
 		// worse than the gap it would close.
 		expect(await stub.release("release-b", "1405", mine)).toBe(false);
 		expect(await stub.next("release-b", "1405")).toBe(theirs + 1);
+	});
+
+	it("safely serializes concurrent calls without issuing duplicate numbers", async () => {
+		const stub = counter();
+		const results = await Promise.all([
+			stub.next("concurrent-test", "1405"),
+			stub.next("concurrent-test", "1405"),
+			stub.next("concurrent-test", "1405"),
+			stub.next("concurrent-test", "1405"),
+		]);
+		expect(results.sort((a, b) => a - b)).toEqual([1, 2, 3, 4]);
 	});
 });
 

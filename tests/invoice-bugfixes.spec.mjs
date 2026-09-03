@@ -910,5 +910,84 @@ test("company editor allows removing an uploaded logo and stamp", async ({ page 
   await page.locator("#btn-company-editor-cancel").click();
 });
 
+test("saving an invoice for another date does not overwrite or reset today's sequence counter", async ({ page }) => {
+  await openApp(page);
+  await page.evaluate(() => {
+    localStorage.setItem("pishFaktor.dailySeq.fouladBonyan", JSON.stringify({
+      day: "14030602",
+      n: 5,
+      days: { "14030602": 5 }
+    }));
+  });
+
+  await page.locator('[data-field="meta.date"]').fill("۱۴۰۳/۰۶/۰۱");
+  await page.locator('[data-field="meta.date"]').dispatchEvent("blur");
+  await page.locator('[data-field="meta.number"]').fill("۱۴۰۳۰۶۰۱-۰۰۱");
+  await fillValidFirstRow(page);
+  await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار دیروز");
+
+  await page.getByRole("button", { name: "ذخیره", exact: true }).click();
+  await page.locator("#app-dialog-input").fill("فاکتور دیروز");
+  await page.locator("#app-dialog-actions button").first().click();
+  await expect(page.locator("#toolbar-status")).toContainText("ذخیره شد");
+
+  const storedSeq = await page.evaluate(() => JSON.parse(localStorage.getItem("pishFaktor.dailySeq.fouladBonyan")));
+  expect(storedSeq.days["14030602"]).toBe(5);
+  expect(storedSeq.days["14030601"]).toBe(1);
+});
+
+test("date input keystrokes immediately validate and blank validity without requiring blur", async ({ page }) => {
+  await openApp(page);
+  const dateInput = page.locator('[data-field="meta.date"]');
+  const validityInput = page.locator('[data-field="meta.validity"]');
+
+  await dateInput.fill("۱۴۰۴/۱۲/۳۱");
+  await expect(validityInput).toHaveValue("");
+  await expect(page.locator("#invoice-validation")).toContainText("تاریخ پیش‌فاکتور یک تاریخ معتبر شمسی نیست");
+});
+
+test("reopening a saved invoice allows automatic validity date to track date updates", async ({ page }) => {
+  await openApp(page);
+  await fillValidFirstRow(page);
+  await page.getByLabel("نام خریدار", { exact: true }).fill("خریدار معتبر");
+  await page.getByRole("button", { name: "ذخیره", exact: true }).click();
+  await page.locator("#app-dialog-input").fill("سند آزمون اعتبار");
+  await page.locator("#app-dialog-actions button").first().click();
+  await expect(page.locator("#toolbar-status")).toContainText("ذخیره شد");
+
+  await page.reload();
+  await page.locator("#btn-saved-list").click();
+  await page.getByRole("button", { name: "باز کردن" }).first().click();
+
+  const newValidity = await page.evaluate(() => {
+    const dateInput = document.querySelector('[data-field="meta.date"]');
+    dateInput.value = "۱۴۰۵/۰۱/۱۵";
+    dateInput.dispatchEvent(new Event("input", { bubbles: true }));
+    return document.querySelector('[data-field="meta.validity"]').value;
+  });
+  expect(newValidity).toBe("۱۴۰۵/۰۱/۱۵");
+});
+
+test("switching company profile updates current document title immediately", async ({ page }) => {
+  await openApp(page);
+  await page.locator("#company-profile").selectOption("karaBorjParseh");
+  const titleAfter = await page.locator("#current-document-title").textContent();
+  expect(titleAfter).not.toBe("");
+  expect(page.locator("#toolbar-status")).toContainText("شرکت صادرکننده تغییر کرد");
+});
+
+test("print clone preserves dir=ltr on phone and postal code fields", async ({ page }) => {
+  await openApp(page);
+  await page.locator('[data-field="seller.phone"]').fill("۰۲۱-۸۸۸۸۸۲۸۰ / ۰۲۱-۸۸۸۸۸۷۸۰");
+  await page.locator('[data-field="seller.postalCode"]').fill("۱۹۷۸۹۷۷۱۹۸");
+
+  await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__printCalls)).toBe(1);
+
+  const ltrElements = await page.locator("#print-document .print-field-value[dir='ltr']").count();
+  expect(ltrElements).toBeGreaterThan(0);
+});
+
+
 
 
