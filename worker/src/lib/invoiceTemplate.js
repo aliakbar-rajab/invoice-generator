@@ -71,10 +71,10 @@ export function computeTotals(items, taxPercent = 0) {
     taxBasisPoints = taxPercent > 0n ? taxPercent * 100n : 0n;
   } else if (taxPercent != null) {
     const normalized = toAsciiDigits(String(taxPercent).trim()).replace(/٫/g, ".");
+    // parseDecimalToBigIntScaled returns 0n for anything it cannot read, never
+    // null, so the only check worth making is the sign one.
     const parsed = parseDecimalToBigIntScaled(normalized, 2);
-    if (parsed !== null && parsed > 0n) {
-      taxBasisPoints = parsed;
-    }
+    if (parsed > 0n) taxBasisPoints = parsed;
   }
 
   const taxTotal = bigRoundDiv(grossTotal * taxBasisPoints, 10000n);

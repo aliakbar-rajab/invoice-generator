@@ -1827,6 +1827,37 @@ body,
   margin-inline: auto;
 }
 
+/*
+ * The one page a refused document prints (renderPrintRefusal in app.js).
+ * A print started from the browser's own menu cannot be cancelled from
+ * `beforeprint`, so the only way to stop a clipped or arithmetically wrong
+ * invoice reaching paper is to give the dialog this sheet to print instead.
+ * It takes the same A4 box as a real page from .print-page above, so it
+ * lands on one sheet of the paper the user already chose.
+ */
+.print-refusal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.print-refusal-inner {
+  max-width: 150mm;
+  padding: 10mm;
+  border: 0.6mm solid #000;
+  border-radius: 2mm;
+}
+.print-refusal-title { font-size: 16pt; font-weight: 850; margin: 0 0 4mm; }
+.print-refusal-lead { font-size: 11pt; font-weight: 700; margin: 0 0 3mm; }
+.print-refusal-list {
+  margin: 0 0 4mm;
+  padding-inline-start: 5mm;
+  text-align: start;
+  font-size: 9.5pt;
+  line-height: 1.9;
+}
+.print-refusal-hint { font-size: 9pt; color: #35373a; margin: 0; }
+
 @media print {
   body.print-mode #app { display: none !important; }
   body.print-mode .print-document { display: block !important; }

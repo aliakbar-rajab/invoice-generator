@@ -191,10 +191,15 @@ export class InvoiceSession extends DurableObject {
       return;
     }
 
-    if (text.startsWith("/tax") || text.startsWith("/maliat")) {
-      const parts = text.split(/\s+/);
-      if (parts.length > 1) {
-        let rateStr = toAsciiDigits(parts[1]).trim().replace(/٫/g, ".");
+    // The whole command, not a prefix of it: `startsWith("/tax")` also
+    // swallowed "/taxes", "/taxi" and anything else beginning those letters,
+    // answering an unrelated command with the tax rate. `@BotName` is what
+    // Telegram appends to a command sent in a group.
+    const taxCommand = text.match(/^\/(?:tax|maliat)(?:@\w+)?(?:\s+(.+))?$/i);
+    if (taxCommand) {
+      const taxArgument = taxCommand[1];
+      if (taxArgument) {
+        let rateStr = toAsciiDigits(taxArgument).trim().replace(/٫/g, ".");
         const validRate = /^(?:\d+|\d*\.\d{1,2})$/.test(rateStr) && rateStr !== ".";
         if (rateStr.startsWith(".")) rateStr = "0" + rateStr;
         const num = parseFloat(rateStr);
@@ -423,25 +428,45 @@ export class InvoiceSession extends DurableObject {
   async handleCallback(cq, token) {
     const chatId = cq.message.chat.id;
     const messageId = cq.message.message_id;
-    const data = cq.data || "";
-    let state = await this.loadState();
 
     // Always acknowledge immediately so the tap doesn't show a spinner, and
     // strip the keyboard from the tapped message so it can't be tapped twice.
     await answerCallbackQuery(token, cq.id).catch(() => {});
     await editMessageReplyMarkup(token, chatId, messageId, { inline_keyboard: [] }).catch(() => {});
 
+    if (await this.routeCallback(cq, token, chatId)) return;
+
+    // Nothing above claimed the tap — a button from a message the user
+    // scrolled back to, or one that no longer matches the step the
+    // conversation has moved on to. The keyboard is already gone by now, so
+    // returning silently (which is what every one of those branches used to
+    // do) left the user with no buttons AND no prompt: a dead conversation
+    // that only /new or /cancel could restart. Re-send whatever the current
+    // step is actually asking for instead.
+    await this.promptForStep(chatId, token, await this.loadState());
+  }
+
+  /**
+   * Routes one button tap. Returns true when the tap was acted on — or
+   * deliberately ignored, as with the double-tap guard — and false when it
+   * does not apply to the conversation's current step, which handleCallback
+   * above turns into a re-prompt rather than silence.
+   */
+  async routeCallback(cq, token, chatId) {
+    const data = cq.data || "";
+    let state = await this.loadState();
+
     if (data === "cancel") {
       await this.saveState(freshState(state?.taxPercent));
       await sendMessage(token, chatId, "عملیات لغو شد.", { reply_markup: MAIN_MENU });
-      return;
+      return true;
     }
 
     if (data === "back") {
       state = this.goBack(state);
       await this.saveState(state);
       await this.promptForStep(chatId, token, state);
-      return;
+      return true;
     }
 
     if (data === "company:other" && state.step === "choose_company") {
@@ -453,12 +478,12 @@ export class InvoiceSession extends DurableObject {
       await sendMessage(token, chatId, "🏢 نام شرکت را وارد کنید:", {
         reply_markup: backAndCancelKeyboard(),
       });
-      return;
+      return true;
     }
 
     if (data.startsWith("company:") && state.step === "choose_company") {
       const key = data.slice("company:".length);
-      if (!getCompany(key)) return;
+      if (!getCompany(key)) return false;
       state = this.advance(state, (s) => {
         s.companyKey = key;
         s.step = "customer_name";
@@ -469,7 +494,7 @@ export class InvoiceSession extends DurableObject {
       await sendMessage(token, chatId, "👤 نام مشتری (خریدار) را وارد کنید:", {
         reply_markup: backAndCancelKeyboard(),
       });
-      return;
+      return true;
     }
 
     if (data === "custentry:items" && state.step === "customer_action") {
@@ -479,7 +504,7 @@ export class InvoiceSession extends DurableObject {
       });
       await this.saveState(state);
       await this.promptItemDescription(chatId, token, state);
-      return;
+      return true;
     }
 
     if (data === "custentry:details" && state.step === "customer_action") {
@@ -489,7 +514,7 @@ export class InvoiceSession extends DurableObject {
       });
       await this.saveState(state);
       await this.promptCustomerDetail(chatId, token, state.step);
-      return;
+      return true;
     }
 
     if (data === "custdetail:skip" && isCustomerDetailStep(state.step)) {
@@ -499,7 +524,7 @@ export class InvoiceSession extends DurableObject {
       });
       await this.saveState(state);
       await this.promptCustomerDetailOrItems(chatId, token, state);
-      return;
+      return true;
     }
 
     if (data === "custdetail:items" && isCustomerDetailStep(state.step)) {
@@ -509,7 +534,7 @@ export class InvoiceSession extends DurableObject {
       });
       await this.saveState(state);
       await this.promptItemDescription(chatId, token, state);
-      return;
+      return true;
     }
 
     if (data === "additem:yes" && state.step === "item_more") {
@@ -521,7 +546,7 @@ export class InvoiceSession extends DurableObject {
         });
         await this.saveState(state);
         await this.promptStamp(chatId, token);
-        return;
+        return true;
       }
       state = this.advance(state, (s) => {
         s.step = "item_description";
@@ -529,14 +554,14 @@ export class InvoiceSession extends DurableObject {
       });
       await this.saveState(state);
       await this.promptItemDescription(chatId, token, state);
-      return;
+      return true;
     }
 
     if (data === "additem:no" && state.step === "item_more") {
       if (state.items.length === 0) {
         await sendMessage(token, chatId, "❗️باید حداقل یک قلم کالا ثبت کنید.");
         await this.promptItemMore(chatId, token);
-        return;
+        return true;
       }
       state = this.advance(state, (s) => {
         s.step = "ask_stamp";
@@ -544,15 +569,16 @@ export class InvoiceSession extends DurableObject {
       });
       await this.saveState(state);
       await this.promptStamp(chatId, token);
-      return;
+      return true;
     }
 
     if (data === "stamp:yes" || data === "stamp:no") {
-      if (state.step !== "ask_stamp") return;
+      if (state.step !== "ask_stamp") return false;
       // Synchronous check-then-set with no await in between, so a second
       // callback for a rapid double-tap can't slip through before the
-      // first one has flipped the flag.
-      if (this.generating) return;
+      // first one has flipped the flag. Reported as handled: the render is
+      // already under way and a re-prompt would talk over it.
+      if (this.generating) return true;
       this.generating = true;
       state = this.advance(state, (s) => {
         s.includeStamp = data === "stamp:yes";
@@ -564,8 +590,10 @@ export class InvoiceSession extends DurableObject {
       } finally {
         this.generating = false;
       }
-      return;
+      return true;
     }
+
+    return false;
   }
 
   // ---------------- Prompts ----------------
@@ -700,6 +728,14 @@ export class InvoiceSession extends DurableObject {
         return;
       case "ask_stamp":
         await this.promptStamp(chatId, token);
+        return;
+      default:
+        // handleCallback now routes every unclaimed button tap through here,
+        // so a step this switch does not know about must still answer with
+        // something the user can act on rather than falling out silently.
+        await sendMessage(token, chatId, "برای شروع صدور پیش‌فاکتور، «➕ فاکتور جدید» را بزنید.", {
+          reply_markup: MAIN_MENU,
+        });
         return;
     }
   }

@@ -97,7 +97,6 @@
   // PREFIX) without ever clobbering a number the user actually typed.
   var numberIsAutoSuggested = false;
   var dateIsAutoSuggested = false;
-  var validityIsAutoSuggested = false;
   var storageWarnings = [];
 
   var ROW_FIELD_LABELS = {
@@ -454,19 +453,27 @@
     localStorage.setItem(CUSTOM_PROFILES_KEY, JSON.stringify(stored));
   }
 
-  // An empty asset is the absence of an override, not an override to nothing:
-  // hydrateCompanyProfiles only applies truthy values, so a stored "" was a
-  // record that changed nothing on reload yet still made
-  // hasBuiltInProfileOverride report the profile as edited (enabling
-  // «بازگردانی به پیش‌فرض» with nothing to undo). Storing one now removes the
-  // key instead, keeping the record and what it means in agreement.
+  // An empty asset is an override to nothing, NOT the absence of an override.
+  // «حذف لوگو» on a shipped company is a deliberate edit and has to survive a
+  // reload like every other one — and this record is the only place it can
+  // live, since persistProfileDetails below deliberately keeps images out of
+  // the details record. Dropping the key on "" instead (which is what this
+  // did) made the removal look like it worked and then handed the shipped
+  // logo straight back on the next load, with the save having reported
+  // success. hydrateCompanyProfiles therefore applies a stored "" too, so the
+  // record and what it means stay in agreement — and an empty override still
+  // counts as an edit for hasBuiltInProfileOverride, which is correct: there
+  // IS something for «بازگردانی به پیش‌فرض» to undo. Getting back to "no
+  // override at all" is that button's job (restoreBuiltInProfileDefaults
+  // drops the whole profile key), not an empty write's.
+  //
+  // Only ever called for a value that actually changed (see
+  // saveCompanyProfileFromEditor), so every call really is an override.
   function persistProfileAsset(profileKey, assetName, dataUrl) {
     var overrides = readStoredObject(PROFILE_ASSETS_KEY);
     var entry = overrides[profileKey] && typeof overrides[profileKey] === "object" ? overrides[profileKey] : {};
-    if (dataUrl) entry[assetName] = String(dataUrl);
-    else delete entry[assetName];
-    if (Object.keys(entry).length) overrides[profileKey] = entry;
-    else delete overrides[profileKey];
+    entry[assetName] = String(dataUrl || "");
+    overrides[profileKey] = entry;
     localStorage.setItem(PROFILE_ASSETS_KEY, JSON.stringify(overrides));
   }
 
@@ -653,11 +660,18 @@
       });
     });
 
+    // Presence of the key, not truthiness of its value: a stored "" is the
+    // record of a deliberate «حذف لوگو» / «حذف مهر» (see persistProfileAsset)
+    // and has to be applied, or the shipped image comes back on every load.
     var assetOverrides = readStoredObject(PROFILE_ASSETS_KEY);
     Object.keys(assetOverrides).forEach(function (key) {
-      if (!COMPANY_PROFILES[key] || !assetOverrides[key]) return;
-      if (assetOverrides[key].logo) COMPANY_PROFILES[key].logo = String(assetOverrides[key].logo);
-      if (assetOverrides[key].stamp) COMPANY_PROFILES[key].stamp = String(assetOverrides[key].stamp);
+      var entry = assetOverrides[key];
+      if (!COMPANY_PROFILES[key] || !entry || typeof entry !== "object") return;
+      ["logo", "stamp"].forEach(function (assetName) {
+        if (Object.prototype.hasOwnProperty.call(entry, assetName)) {
+          COMPANY_PROFILES[key][assetName] = String(entry[assetName] || "");
+        }
+      });
     });
     renderCompanyProfileOptions(DEFAULT_PROFILE_KEY);
   }
@@ -1058,6 +1072,33 @@
     }
   }
 
+  // Has this exact daily-format number already been retired by the company's
+  // counter — i.e. is some document carrying it already saved or printed?
+  // commitInvoiceNumber only ever raises a day's high-water mark, so the
+  // question is just whether n sits at or below it. Used by «ذخیره با نام
+  // جدید», which would otherwise put an issued number on a second document.
+  function invoiceNumberIsCommitted(profileKey, number) {
+    var ascii = toAsciiDigits(number || "");
+    var match = ascii.match(/^(\d{8})-(\d+)$/);
+    if (!match) return false;
+    var n = parseInt(match[2], 10);
+    if (!n) return false;
+    var key = SEQ_KEY_PREFIX + (COMPANY_PROFILES[profileKey] ? profileKey : DEFAULT_PROFILE_KEY);
+    try {
+      var saved = JSON.parse(localStorage.getItem(key) || "null");
+      if (!saved || typeof saved !== "object") return false;
+      var day = match[1];
+      var highWater = 0;
+      if (saved.days && typeof saved.days === "object" && saved.days[day] != null) highWater = saved.days[day] || 0;
+      else if (saved.day === day) highWater = saved.n || 0;
+      return n <= highWater;
+    } catch (err) {
+      // Unreadable storage proves nothing about the number, and guessing
+      // "already used" here would renumber a document for no reason.
+      return false;
+    }
+  }
+
   function refreshLiveInvoiceNumber() {
     if (!numberIsAutoSuggested) return false;
     var numberInput = document.querySelector('[data-field="meta.number"]');
@@ -1160,6 +1201,21 @@
   function setField(name, value) {
     var el = document.querySelector('[data-field="' + name + '"]');
     if (el) el.value = value;
+  }
+
+  // Does this [data-field] element carry its value as text, rather than as a
+  // form control's `.value`? Decided by what the element IS, not by
+  // `isContentEditable` — that property reports false wherever
+  // `contenteditable="plaintext-only"` is unsupported (the value the two
+  // text fields in the sheet are declared with), and there the old check sent
+  // meta.title and company.name down the `.value` branch of
+  // collectInvoiceData: `undefined`, assigned straight over the profile's own
+  // name by the Object.assign below it, and dropped entirely by
+  // JSON.stringify on the way into storage. The tag test cannot go wrong that
+  // way regardless of what the browser supports.
+  function isTextContentField(el) {
+    var tag = el.tagName;
+    return tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT";
   }
 
   // Overwrites only the company fields (name/nationalId/address/phones/logo)
@@ -1317,6 +1373,8 @@
     }
   }
 
+  var MAX_STORED_IMAGE_BYTES = 3.5 * 1024 * 1024;
+
   function resizeImageFile(file, maxDimension) {
     return new Promise(function (resolve, reject) {
       if (!file || !/^image\//i.test(file.type || "")) {
@@ -1328,12 +1386,31 @@
         return;
       }
 
+      // SVG is resolution-independent and already small, so the raster path
+      // below is pure loss for it: both file pickers advertise SVG, and every
+      // one of them used to come back as a <=720px WebP bitmap — visibly soft
+      // against the shipped vector logo on the same printed A4, and rejected
+      // outright ("ابعاد تصویر قابل تشخیص نیست") whenever the file carried no
+      // intrinsic width/height. It is still loaded through an <img> first, so
+      // an unrenderable file is caught exactly as before; <img> also means no
+      // script inside the SVG ever runs.
+      var isVector = /^image\/svg\+xml$/i.test(file.type || "");
+
       var reader = new FileReader();
       reader.onerror = function () { reject(new Error("خواندن تصویر ممکن نشد.")); };
       reader.onload = function () {
+        var source = String(reader.result || "");
         var img = new Image();
         img.onerror = function () { reject(new Error("ساختار تصویر قابل استفاده نیست.")); };
         img.onload = function () {
+          if (isVector) {
+            if (source.length > MAX_STORED_IMAGE_BYTES) {
+              reject(new Error("حجم فایل SVG بیش از حد بزرگ است؛ فایل ساده‌تری انتخاب کنید."));
+              return;
+            }
+            resolve(source);
+            return;
+          }
           try {
             var width = img.naturalWidth || img.width;
             var height = img.naturalHeight || img.height;
@@ -1351,7 +1428,7 @@
             context.imageSmoothingQuality = "high";
             context.drawImage(img, 0, 0, canvas.width, canvas.height);
             var dataUrl = canvas.toDataURL("image/webp", 0.9);
-            if (!dataUrl || dataUrl.length > 3.5 * 1024 * 1024) {
+            if (!dataUrl || dataUrl.length > MAX_STORED_IMAGE_BYTES) {
               reject(new Error("تصویر پس از بهینه‌سازی هنوز بیش از حد بزرگ است."));
               return;
             }
@@ -1360,7 +1437,7 @@
             reject(new Error(err && err.message ? err.message : "پردازش تصویر ممکن نشد."));
           }
         };
-        img.src = String(reader.result || "");
+        img.src = source;
       };
       reader.readAsDataURL(file);
     });
@@ -2203,7 +2280,7 @@
           this.size = Math.max(2, (this.value || "").length);
         });
       } else {
-        if (el.isContentEditable && (field === "meta.title" || field === "company.name")) {
+        if (isTextContentField(el) && (field === "meta.title" || field === "company.name")) {
           el.addEventListener("keydown", function (event) {
             if (event.key === "Enter") {
               event.preventDefault();
@@ -2228,12 +2305,11 @@
             dateIsAutoSuggested = false;
             if (numberIsAutoSuggested) refreshLiveInvoiceNumber();
             refreshValidityFromDate();
-          } else if (el.isContentEditable) {
+          } else if (isTextContentField(el)) {
             el.textContent = toPersianDigits(el.textContent);
           } else {
             el.value = toPersianDigits(el.value);
           }
-          if (field === "meta.validity") validityIsAutoSuggested = false;
           recalcAll({ skipStaticFit: false });
         });
         if (el.tagName === "INPUT") {
@@ -2249,7 +2325,6 @@
               recalcAll({ skipStaticFit: false });
               refreshValidityFromDate();
             }
-            if (field === "meta.validity") validityIsAutoSuggested = false;
             // The footer band is a single website field now; its is-empty
             // state (and the amount-in-words strip's) is derived centrally in
             // fitStaticFields rather than per-item here.
@@ -2287,7 +2362,7 @@
     };
 
     sheet.querySelectorAll("[data-field]").forEach(function (el) {
-      var value = el.isContentEditable ? el.textContent.trim() : el.value;
+      var value = isTextContentField(el) ? el.textContent.trim() : el.value;
       setPath(data, el.getAttribute("data-field"), value);
     });
 
@@ -2367,7 +2442,7 @@
     document.querySelectorAll("[data-field]").forEach(function (el) {
       var value = getPath(data, el.getAttribute("data-field"));
       if (value == null) value = "";
-      if (el.isContentEditable) {
+      if (isTextContentField(el)) {
         el.textContent = value;
       } else {
         el.value = value;
@@ -2430,7 +2505,6 @@
     validationRequested = false;
     validationEl.hidden = true;
     dateIsAutoSuggested = false;
-    validityIsAutoSuggested = false;
     recalcAll();
   }
 
@@ -2474,8 +2548,19 @@
     }
   }
 
+  // Storage keys that hold something under SAVED_ENTRY_PREFIX which does not
+  // parse as a saved document. Recomputed by every loadSavedList() call and
+  // listed by renderSavedList, so a damaged entry is a row the user can see
+  // and delete. It used to be reported through addStorageWarning instead —
+  // and that list is append-only and never cleared, while the entry itself
+  // was filtered out of the panel: a permanent banner about a document with
+  // no delete button anywhere. The raw value is still never overwritten, only
+  // shown; deleting is the user's explicit choice.
+  var corruptSavedEntries = [];
+
   function loadSavedList() {
     var list = {};
+    corruptSavedEntries = [];
     try {
       for (var index = 0; index < localStorage.length; index += 1) {
         var key = localStorage.key(index);
@@ -2486,7 +2571,7 @@
           if (!entry) throw new Error("Invalid saved entry");
           list[entry.id] = entry;
         } catch (err) {
-          addStorageWarning("حداقل یک سند ذخیره‌شده خراب است؛ نسخهٔ خام آن برای بازیابی حذف نشد.");
+          corruptSavedEntries.push({ key: key, id: fallbackId });
         }
       }
 
@@ -2598,9 +2683,9 @@
         return b.savedAt - a.savedAt;
       });
 
-    savedCountEl.textContent = toPersianDigits(String(entries.length));
+    savedCountEl.textContent = toPersianDigits(String(entries.length + corruptSavedEntries.length));
     savedListEl.innerHTML = "";
-    savedEmptyEl.hidden = entries.length > 0;
+    savedEmptyEl.hidden = entries.length + corruptSavedEntries.length > 0;
 
     entries.forEach(function (entry) {
       var li = document.createElement("li");
@@ -2656,7 +2741,59 @@
       li.appendChild(actions);
       savedListEl.appendChild(li);
     });
+
+    // Damaged entries, listed last. They cannot be opened — nothing here
+    // knows what they were — but they can now be got rid of, which is the
+    // only action left that a user can take about one.
+    corruptSavedEntries.forEach(function (broken) {
+      var li = document.createElement("li");
+      li.className = "is-corrupt";
+
+      var info = document.createElement("div");
+      info.className = "saved-item-info";
+      var nameEl = document.createElement("span");
+      nameEl.className = "saved-item-name";
+      nameEl.textContent = "سند خراب — قابل باز کردن نیست";
+      var timeEl = document.createElement("span");
+      timeEl.className = "saved-item-time";
+      timeEl.textContent = "شناسه: " + broken.id + " · محتوای این سند خوانده نمی‌شود و دست‌نخورده نگه داشته شده است";
+      info.appendChild(nameEl);
+      info.appendChild(timeEl);
+
+      var actions = document.createElement("div");
+      actions.className = "saved-item-actions";
+      var deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "danger";
+      deleteBtn.textContent = "حذف";
+      deleteBtn.addEventListener("click", function () {
+        deleteCorruptSavedEntry(broken.key);
+      });
+      actions.appendChild(deleteBtn);
+
+      li.appendChild(info);
+      li.appendChild(actions);
+      savedListEl.appendChild(li);
+    });
     renderOutputWarnings(calculationErrors);
+  }
+
+  async function deleteCorruptSavedEntry(key) {
+    var confirmed = await confirmApp(
+      "حذف سند خراب",
+      "محتوای این سند خوانده نمی‌شود و بازیابی آن ممکن نیست. برای همیشه حذف شود؟ این کار قابل بازگشت نیست.",
+      "حذف",
+      true
+    );
+    if (!confirmed) return;
+    try {
+      localStorage.removeItem(key);
+    } catch (err) {
+      setStatus("حذف سند خراب ناموفق بود؛ ذخیرهٔ مرورگر در دسترس نیست.");
+      return;
+    }
+    renderSavedList();
+    setStatus("سند خراب حذف شد.");
   }
 
   async function saveCurrent(forceNew) {
@@ -2727,6 +2864,29 @@
       // naming dialog was open. Rebase only untouched suggestions; manually
       // entered and imported numbers remain exactly as authored.
       refreshLiveInvoiceNumber();
+
+      // «ذخیره با نام جدید» makes a SECOND document out of the one on screen.
+      // Carrying its number across as well put the same accounting number on
+      // two saved invoices — precisely what commitInvoiceNumber exists to
+      // prevent — so a number the counter has already retired is replaced by
+      // the next free one, and the status line says so rather than changing
+      // it behind the user's back. A number the counter has never issued (a
+      // fresh document, or one typed by hand for a day with no history) is
+      // left exactly as authored.
+      var renumberedTo = "";
+      if (forceNew) {
+        var numberInput = document.querySelector('[data-field="meta.number"]');
+        var activeProfile = COMPANY_PROFILES[profileSelectEl.value] ? profileSelectEl.value : DEFAULT_PROFILE_KEY;
+        if (numberInput && invoiceNumberIsCommitted(activeProfile, numberInput.value)) {
+          var freshNumber = suggestInvoiceNumber(activeProfile, currentInvoiceDateValue());
+          if (freshNumber && freshNumber !== numberInput.value) {
+            numberInput.value = freshNumber;
+            fitNumericEl(numberInput);
+            renumberedTo = freshNumber;
+          }
+        }
+      }
+
       data = collectInvoiceData();
       var savedAt = Date.now();
       persistSavedEntry({
@@ -2741,7 +2901,6 @@
       commitInvoiceNumber(data.company.profile, data.meta.number);
       numberIsAutoSuggested = false;
       dateIsAutoSuggested = false;
-      validityIsAutoSuggested = false;
       currentSavedName = name;
       // This tab's own save is now the version of record; a normal next
       // save in the same tab must compare against this, not the one that
@@ -2750,7 +2909,9 @@
       isDirty = false;
       defaultRowCountManaged = false;
       renderSavedList();
-      setStatus("ذخیره شد — ساعت " + nowLabel());
+      setStatus(renumberedTo
+        ? "ذخیره شد — ساعت " + nowLabel() + "؛ شمارهٔ سند قبلی مصرف شده بود و شمارهٔ «" + renumberedTo + "» به این نسخه داده شد."
+        : "ذخیره شد — ساعت " + nowLabel());
       return true;
     } catch (err) {
       setStatus("ذخیره در مرورگر ناموفق بود؛ از «پشتیبان فایل» استفاده کنید.");
@@ -2773,7 +2934,26 @@
       }
     }
 
-    applyInvoiceData(entry.data);
+    // Same boundary openFromFile puts around this call, and for the same
+    // reason: normalizeSavedEntry only proves `data` is an object, not that
+    // every field inside it is sane. Without the catch a throw here surfaces
+    // as an unhandled rejection — a half-applied sheet, no message, and the
+    // editor silently detached from whatever it was showing before.
+    try {
+      applyInvoiceData(entry.data);
+    } catch (err) {
+      await reportUnopenableFile(
+        "سند باز نشد",
+        "«" + entry.name + "» ساختار سالمی ندارد و کامل باز نشد. برای جلوگیری از ماندن سند نیمه‌باز، یک سند خالی بارگذاری شد."
+      );
+      applyInvoiceData(blankInvoice(), { manageDefaultRows: true });
+      currentSavedId = null;
+      currentSavedName = "";
+      currentSavedVersion = null;
+      isDirty = false;
+      setStatus("«" + entry.name + "» باز نشد؛ ساختار آن سالم نیست.");
+      return;
+    }
     currentSavedId = id;
     currentSavedName = entry.name;
     currentSavedVersion = entry.savedAt;
@@ -3545,17 +3725,17 @@
     }
   }
 
-  async function printInvoiceInner() {
-    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    refreshAutomaticTemporalFields(true);
-    recalcAll();
-    var warnings = validateInvoiceForOutput();
-    if (financialBlockingErrors.length) {
-      setStatus("چاپ انجام نشد؛ خطاهای مالی را اصلاح کنید.");
-      return false;
-    }
-
-    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+  /*
+   * The whole print decision, as one synchronous pass over the live sheet:
+   * orientation relief, page planning, and the per-page rhythm solve. Both
+   * print entry points go through it, so a document the toolbar button
+   * refuses can never be printed by the browser's own Print command either.
+   *
+   * `warnings` is appended to in place. Returns
+   *   { ok: true,  pages, pageCount }
+   *   { ok: false, status, reason }   reason is also pushed onto `warnings`
+   */
+  function solvePrintOutcome(warnings) {
     autoGrowTextareas();
     var rows = printableSourceRows();
     var orientation = currentOrientation();
@@ -3581,50 +3761,65 @@
       // "final-page" means the closing block leaves no room for even a single
       // row. Reporting the latter against an arbitrary (usually blank) row
       // sent the user hunting for a long description that does not exist.
-      var overflowStatus;
       if (plan.overflowKind === "row") {
         warnings.push(
           "ردیف " + toPersianDigits(plan.overflowRowIndex + 1) +
           " بلندتر از ظرفیت یک صفحهٔ A4 است؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد. شرح را کوتاه‌تر یا به چند ردیف تقسیم کنید"
         );
-        overflowStatus = "چاپ انجام نشد؛ یک ردیف در صفحهٔ A4 جا نمی‌شود.";
-      } else if (diagnoseFinalPageOverflow(rows, plan.orientation) === "notes") {
+        return {
+          ok: false,
+          status: "چاپ انجام نشد؛ یک ردیف در صفحهٔ A4 جا نمی‌شود.",
+          reason: warnings[warnings.length - 1],
+        };
+      }
+      if (diagnoseFinalPageOverflow(rows, plan.orientation) === "notes") {
         warnings.push(
           "متن «توضیحات» بلندتر از فضای باقی‌ماندهٔ صفحهٔ پایانی است؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد. متن توضیحات را کوتاه‌تر کنید"
         );
-        overflowStatus = "چاپ انجام نشد؛ متن توضیحات در صفحهٔ A4 جا نمی‌شود.";
-      } else {
-        warnings.push(
-          "بخش پایانی سند (توضیحات، مبلغ به حروف، جمع‌کل، امضاها و فوتر) در یک صفحهٔ A4 جا نمی‌شود؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد. متن توضیحات را کوتاه‌تر کنید یا جهت صفحه را تغییر دهید"
-        );
-        overflowStatus = "چاپ انجام نشد؛ بخش پایانی سند در صفحهٔ A4 جا نمی‌شود.";
+        return {
+          ok: false,
+          status: "چاپ انجام نشد؛ متن توضیحات در صفحهٔ A4 جا نمی‌شود.",
+          reason: warnings[warnings.length - 1],
+        };
       }
-      renderOutputWarnings(warnings);
-      cleanupPrintDocument();
-      setStatus(overflowStatus);
-      return false;
+      warnings.push(
+        "بخش پایانی سند (توضیحات، مبلغ به حروف، جمع‌کل، امضاها و فوتر) در یک صفحهٔ A4 جا نمی‌شود؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد. متن توضیحات را کوتاه‌تر کنید یا جهت صفحه را تغییر دهید"
+      );
+      return {
+        ok: false,
+        status: "چاپ انجام نشد؛ بخش پایانی سند در صفحهٔ A4 جا نمی‌شود.",
+        reason: warnings[warnings.length - 1],
+      };
     }
+
     var realized = realizePrintPlan(plan);
     if (!realized.pages) {
       warnings.push(
         "صفحهٔ " + toPersianDigits(realized.pageNo) +
         " در محدودهٔ A4 جا نمی‌شود؛ برای جلوگیری از حذف محتوا، چاپ متوقف شد"
       );
-      renderOutputWarnings(warnings);
-      cleanupPrintDocument();
-      setStatus("چاپ انجام نشد؛ چیدمان نهایی از محدودهٔ A4 بیرون می‌زند.");
-      return false;
+      return {
+        ok: false,
+        status: "چاپ انجام نشد؛ چیدمان نهایی از محدودهٔ A4 بیرون می‌زند.",
+        reason: warnings[warnings.length - 1],
+      };
     }
-    if (plan.chunks.length > 1) warnings.push("این پیش‌فاکتور در " + toPersianDigits(plan.chunks.length) + " صفحه چاپ می‌شود");
-    renderOutputWarnings(warnings);
 
+    if (plan.chunks.length > 1) warnings.push("این پیش‌فاکتور در " + toPersianDigits(plan.chunks.length) + " صفحه چاپ می‌شود");
+    return { ok: true, pages: realized.pages, pageCount: plan.chunks.length };
+  }
+
+  // Everything that makes a print authoritative, in the one place both entry
+  // points reach it: the accounting number is retired, the automatic fields
+  // stop being live suggestions, and the saved-PDF filename is set. Printing
+  // the same document from the browser's own Print command used to skip all
+  // of this, so the next document reused an invoice number that was already
+  // out on paper.
+  function finalizePrintedDocument() {
     var data = collectInvoiceData();
     commitInvoiceNumber(data.company.profile, data.meta.number);
     numberIsAutoSuggested = false;
     dateIsAutoSuggested = false;
-    validityIsAutoSuggested = false;
-
-    renderPrintPlan(realized.pages);
 
     if (originalDocTitle === null) originalDocTitle = document.title;
     document.title = [
@@ -3632,23 +3827,124 @@
       safeFilenamePart(data.meta.number),
       safeFilenamePart(data.buyer.name || data.company.name || resolveProfile(data.company.profile).label),
     ].filter(Boolean).join("_");
+  }
+
+  /*
+   * A browser-initiated print cannot be cancelled from `beforeprint` — the
+   * dialog is already opening. What CAN be controlled is what it finds to
+   * print, so a refused document hands it this single sheet instead of the
+   * live editor. Without it the editor prints as-is: a sheet several page
+   * boxes tall, broken wherever the paper happens to run out, with rows
+   * clipped and nothing on the paper saying anything was lost.
+   */
+  function renderPrintRefusal(status, reasons) {
+    var page = document.createElement("article");
+    page.className = "invoice-sheet orientation-" + currentOrientation() + " print-page print-refusal";
+    page.setAttribute("dir", "rtl");
+
+    var inner = document.createElement("div");
+    inner.className = "print-refusal-inner";
+
+    var title = document.createElement("p");
+    title.className = "print-refusal-title";
+    title.textContent = "این پیش‌فاکتور چاپ نشد";
+    inner.appendChild(title);
+
+    var lead = document.createElement("p");
+    lead.className = "print-refusal-lead";
+    lead.textContent = status;
+    inner.appendChild(lead);
+
+    // .print-page clips whatever runs past its box, so a document with a
+    // fault on all thirty rows must not push the closing hint off the paper.
+    var MAX_LISTED_REASONS = 8;
+    var listed = (reasons || []).slice(0, MAX_LISTED_REASONS);
+    var hidden = (reasons || []).length - listed.length;
+    var list = document.createElement("ul");
+    list.className = "print-refusal-list";
+    listed.forEach(function (text) {
+      var li = document.createElement("li");
+      li.textContent = text;
+      list.appendChild(li);
+    });
+    if (hidden > 0) {
+      var more = document.createElement("li");
+      more.textContent = "و " + toPersianDigits(hidden) + " مورد دیگر — فهرست کامل در خود برنامه دیده می‌شود.";
+      list.appendChild(more);
+    }
+    if (list.children.length) inner.appendChild(list);
+
+    var hint = document.createElement("p");
+    hint.className = "print-refusal-hint";
+    hint.textContent = "این چاپ را لغو کنید، مورد بالا را در برنامه اصلاح کنید و سپس دکمهٔ «چاپ» را بزنید.";
+    inner.appendChild(hint);
+
+    page.appendChild(inner);
+    return renderPrintPlan([page]);
+  }
+
+  async function printInvoiceInner() {
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    refreshAutomaticTemporalFields(true);
+    recalcAll();
+    var warnings = validateInvoiceForOutput();
+    if (financialBlockingErrors.length) {
+      setStatus("چاپ انجام نشد؛ خطاهای مالی را اصلاح کنید.");
+      return false;
+    }
+
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+
+    var outcome = solvePrintOutcome(warnings);
+    renderOutputWarnings(warnings);
+    if (!outcome.ok) {
+      cleanupPrintDocument();
+      setStatus(outcome.status);
+      return false;
+    }
+
+    finalizePrintedDocument();
+    renderPrintPlan(outcome.pages);
+    setStatus("سند برای چاپ آماده شد"
+      + (outcome.pageCount > 1 ? " — " + toPersianDigits(outcome.pageCount) + " صفحه" : "")
+      + "؛ شمارهٔ سند ثبت شد.");
     window.setTimeout(function () {
       window.print();
     }, 0);
     return true;
   }
 
+  /*
+   * The browser's own Print command (menu, toolbar icon, Ctrl+Shift+P, print
+   * preview) never reaches printInvoice() above, so this runs the same
+   * pipeline again — validation, page planning and number commit included.
+   * It used to plan pages only, which let a browser-menu print produce a
+   * sheet whose totals silently excluded an unparseable row, and left the
+   * invoice number uncommitted so the next document reused it.
+   */
   window.addEventListener("beforeprint", function () {
     if (document.body.classList.contains("print-mode")) return;
     refreshAutomaticTemporalFields(true);
     recalcAll();
-    autoGrowTextareas();
-    var orientation = currentOrientation();
-    var plan = buildPrintPlan(printableSourceRows(), orientation);
-    if (!plan.overflowKind) {
-      var realized = realizePrintPlan(plan);
-      if (realized.pages) renderPrintPlan(realized.pages);
+    var warnings = validateInvoiceForOutput();
+    if (financialBlockingErrors.length) {
+      var financialStatus = "چاپ انجام نشد؛ خطاهای مالی را اصلاح کنید.";
+      renderOutputWarnings(warnings);
+      setStatus(financialStatus);
+      renderPrintRefusal(financialStatus, financialBlockingErrors.slice());
+      return;
     }
+
+    var outcome = solvePrintOutcome(warnings);
+    renderOutputWarnings(warnings);
+    if (!outcome.ok) {
+      setStatus(outcome.status);
+      renderPrintRefusal(outcome.status, outcome.reason ? [outcome.reason] : []);
+      return;
+    }
+
+    finalizePrintedDocument();
+    renderPrintPlan(outcome.pages);
   });
   window.addEventListener("afterprint", cleanupPrintDocument);
 
@@ -3766,7 +4062,6 @@
       isDirty = false;
       numberIsAutoSuggested = true;
       dateIsAutoSuggested = true;
-      validityIsAutoSuggested = true;
       stampRequested = true;
       syncStampVisibility();
       setStatus("سند جدید آماده است.");
@@ -3818,7 +4113,6 @@
       var input = document.querySelector('[data-field="meta.validity"]');
       if (input) input.value = resolveValidityValue(this.value);
       syncValidityFieldVisibility(this.value);
-      validityIsAutoSuggested = this.value !== "manual";
       if (this.value === "manual" && input) input.focus();
       isDirty = true;
       setStatus("تغییرات ذخیره‌نشده");
@@ -4160,7 +4454,6 @@
     currentSavedVersion = null;
     numberIsAutoSuggested = true;
     dateIsAutoSuggested = true;
-    validityIsAutoSuggested = true;
     stampRequested = true;
     syncStampVisibility();
     setStatus("آماده برای ثبت پیش‌فاکتور جدید.");
