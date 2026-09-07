@@ -1,39 +1,6 @@
-import { test, expect } from "@playwright/test";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { repoRoot, startRepoServer, stopRepoServer } from "./server-helper.mjs";
-
-let server;
-let baseURL;
-
-test.beforeAll(async () => {
-  ({ server, baseURL } = await startRepoServer());
-});
-
-test.afterAll(async () => {
-  await stopRepoServer(server);
-});
-
-async function openApp(page) {
-  await page.addInitScript(() => {
-    window.__printCalls = 0;
-    window.print = () => { window.__printCalls += 1; };
-    // Any promise the app fails to settle shows up here rather than vanishing
-    // into the console, which is what the openFromFile rewrite has to avoid.
-    window.__rejections = [];
-    window.addEventListener("unhandledrejection", (event) => {
-      window.__rejections.push(String((event.reason && event.reason.message) || event.reason));
-    });
-  });
-  await page.goto(baseURL);
-  await expect(page.locator("#inv-rows tr")).toHaveCount(7);
-}
-
-async function fillValidFirstRow(page, price = "1000") {
-  await page.getByLabel("ردیف ۱ — شرح کالا یا خدمت", { exact: true }).fill("کالای آزمایشی");
-  await page.getByLabel("ردیف ۱ — تعداد یا مقدار", { exact: true }).fill("1");
-  await page.getByLabel("ردیف ۱ — مبلغ واحد", { exact: true }).fill(price);
-}
+import { test, expect, openApp, fillValidFirstRow, repoRoot } from "./fixtures.mjs";
 
 async function saveNamed(page, name, saveAs = false) {
   const buttonName = saveAs ? "ذخیره با نام جدید" : "ذخیره";
@@ -1117,7 +1084,7 @@ async function openResetDialogWithOverride(page, seedExtra) {
     }));
     localStorage.setItem("preinvoice.profileAssets.v1", extra);
   }, seedExtra);
-  await page.goto(baseURL);
+  await page.goto("/");
   await expect(page.locator("#inv-rows tr")).toHaveCount(7);
   await expect(page.locator("#inv-company-name")).toHaveText("دستکاری");
   await page.getByRole("button", { name: "تنظیمات", exact: true }).click();

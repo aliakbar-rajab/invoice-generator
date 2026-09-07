@@ -257,27 +257,9 @@ var PersianNumbers = {
   rialToWordsBig: rialToWordsBig,
 };
 
-if (typeof window !== "undefined") {
-  window.PersianNumbers = PersianNumbers;
-  window.normalizeStrictNumber = normalizeStrictNumber;
-}
+// Classic-script load (index.html) puts every function above in global scope
+// already; this is the namespaced handle for anything that prefers one.
+if (typeof window !== "undefined") window.PersianNumbers = PersianNumbers;
 
-if (typeof module !== "undefined" && module.exports) {
-  module.exports = {
-    toPersianDigits: toPersianDigits,
-    toAsciiDigits: toAsciiDigits,
-    normalizeStrictNumber: normalizeStrictNumber,
-    parseDecimalToBigIntScaled: parseDecimalToBigIntScaled,
-    bigRoundDiv: bigRoundDiv,
-    groupDigits: groupDigits,
-    parseMoneyBig: parseMoneyBig,
-    parseQtyMilli: parseQtyMilli,
-    parsePercentBps: parsePercentBps,
-    formatBigRial: formatBigRial,
-    formatQtyMilli: formatQtyMilli,
-    formatPercentBps: formatPercentBps,
-    threeDigitsToWords: threeDigitsToWords,
-    scaleWordForGroup: scaleWordForGroup,
-    rialToWordsBig: rialToWordsBig,
-  };
-}
+// CommonJS load (tests/invoice-bugfixes.spec.mjs imports this file directly).
+if (typeof module !== "undefined" && module.exports) module.exports = PersianNumbers;

@@ -4,28 +4,8 @@
  * inputmode hints on numeric/tel/url fields, dialog-button hover feedback,
  * and overscroll containment on the two scrollable overlay panels.
  */
-import { test, expect } from "@playwright/test";
-import { startRepoServer, stopRepoServer } from "./server-helper.mjs";
+import { test, expect, openApp, cell } from "./fixtures.mjs";
 
-let server;
-let baseURL;
-
-test.beforeAll(async () => {
-  ({ server, baseURL } = await startRepoServer());
-});
-
-test.afterAll(async () => {
-  await stopRepoServer(server);
-});
-
-async function openApp(page) {
-  await page.goto(baseURL);
-  await expect(page.locator("#inv-rows tr")).toHaveCount(7);
-}
-
-const ROW_LABEL = { description: "شرح کالا یا خدمت" };
-const persian = (n) => String(n).replace(/[0-9]/g, (d) => String.fromCharCode(d.charCodeAt(0) + 1728));
-const cell = (page, n, field) => page.getByLabel(`ردیف ${persian(n)} — ${ROW_LABEL[field]}`, { exact: true });
 
 // Opens the plain two-button "پیش‌فاکتور جدید" confirm dialog by making the
 // current document dirty first (btn-new only prompts when isDirty is true).
@@ -69,6 +49,25 @@ test("numeric/tel/url fields carry matching inputmode hints", async ({ page }) =
 // Dialog focus trap
 // ---------------------------------------------------------------------------
 
+// The dialogs are native <dialog>s opened with showModal(), so the focus trap
+// is the browser's: nothing behind the dialog is reachable by Tab, and the
+// background is genuinely inert rather than merely labelled aria-modal.
+// Chromium's wrap passes through <body> on its way from the last control back
+// to the first, so these walk the cycle rather than asserting a single step.
+async function tabThroughCycle(page, presses, key = "Tab") {
+  const seen = [];
+  for (let i = 0; i < presses; i += 1) {
+    await page.keyboard.press(key);
+    seen.push(await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!el || el === document.body) return "body";
+      const dialog = el.closest("dialog[open]");
+      return dialog ? `in:${dialog.id}` : `OUTSIDE:${el.id || el.tagName}`;
+    }));
+  }
+  return seen;
+}
+
 test("Tab stays inside the confirm dialog instead of escaping to the toolbar behind it", async ({ page }) => {
   await openApp(page);
   await openConfirmDialog(page);
@@ -78,15 +77,28 @@ test("Tab stays inside the confirm dialog instead of escaping to the toolbar beh
   const first = buttons.nth(0);
   const last = buttons.nth(1);
 
+  // Walking the whole cycle must never reach a control behind the dialog.
   await last.focus();
+  const forward = await tabThroughCycle(page, 6);
+  expect(forward.filter((step) => step.startsWith("OUTSIDE:"))).toEqual([]);
+
+  // ...and it does come back round to the first action.
+  await last.focus();
+  await page.keyboard.press("Tab");
   await page.keyboard.press("Tab");
   await expect(first).toBeFocused();
 
-  await page.keyboard.press("Shift+Tab");
-  await expect(last).toBeFocused();
-
   await last.click();
   await expect(page.locator("#app-dialog")).toBeHidden();
+});
+
+test("Escape closes the confirm dialog and settles it as a cancel", async ({ page }) => {
+  await openApp(page);
+  await openConfirmDialog(page);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#app-dialog")).toBeHidden();
+  // Cancelling «پیش‌فاکتور جدید» must leave the typed row untouched.
+  await expect(cell(page, 1, "description")).toHaveValue("کالای آزمایشی");
 });
 
 test("Tab stays inside the company editor dialog across its full field list", async ({ page }) => {
@@ -100,11 +112,13 @@ test("Tab stays inside the company editor dialog across its full field list", as
 
   await last.focus();
   await expect(last).toBeFocused();
+  const forward = await tabThroughCycle(page, 8);
+  expect(forward.filter((step) => step.startsWith("OUTSIDE:"))).toEqual([]);
+
+  await last.focus();
+  await page.keyboard.press("Tab");
   await page.keyboard.press("Tab");
   await expect(first).toBeFocused();
-
-  await page.keyboard.press("Shift+Tab");
-  await expect(last).toBeFocused();
 
   await page.locator("#btn-company-editor-cancel").click();
   await expect(page.locator("#company-editor-dialog")).toBeHidden();

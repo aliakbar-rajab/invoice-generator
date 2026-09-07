@@ -9,13 +9,10 @@
     "predev": "npm run sync-assets",
     "dev": "wrangler dev",
     "pretest": "npm run sync-assets",
-    "test": "vitest",
-    "pretest:layout": "npm run sync-assets",
-    "test:layout": "playwright test"
+    "test": "vitest"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.22.0",
-    "@playwright/test": "^1.62.1",
     "vitest": "~4.1.0",
     "wrangler": "^4.125.0"
   },

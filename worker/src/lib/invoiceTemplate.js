@@ -8,15 +8,7 @@ import {
   toAsciiDigits,
   toPersianDigits,
 } from "./persianNumbers.js";
-
-function escapeHtml(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+import { escapeHtml } from "./html.js";
 
 const METER_ICON = `<svg class="inv-meta-icon" viewBox="0 0 24 24"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg>`;
 const NUMBER_ICON = `<svg class="inv-meta-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></svg>`;
@@ -67,9 +59,10 @@ export function computeTotals(items, taxPercent = 0) {
   let taxBasisPoints = 0n;
   if (typeof taxPercent === "number" && !Number.isNaN(taxPercent) && Number.isFinite(taxPercent)) {
     taxBasisPoints = BigInt(Math.max(0, Math.round(taxPercent * 100)));
-  } else if (typeof taxPercent === "bigint") {
-    taxBasisPoints = taxPercent > 0n ? taxPercent * 100n : 0n;
   } else if (taxPercent != null) {
+    // A string is what the desktop app's own tax field produces ("۱۰"), and
+    // BigInt() choking on Persian digits is what used to throw RangeError
+    // here; see the regression test of the same name.
     const normalized = toAsciiDigits(String(taxPercent).trim()).replace(/٫/g, ".");
     // parseDecimalToBigIntScaled returns 0n for anything it cannot read, never
     // null, so the only check worth making is the sign one.

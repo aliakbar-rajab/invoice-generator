@@ -3,50 +3,11 @@
  * One describe block per defect; each asserts the broken behaviour is gone AND
  * that the neighbouring behaviour it could plausibly have broken still works.
  */
-import { test, expect } from "@playwright/test";
-import { startRepoServer, stopRepoServer } from "./server-helper.mjs";
+import { test, expect, openApp, cell, persian, fillValidFirstRow } from "./fixtures.mjs";
 
-let server;
-let baseURL;
-
-test.beforeAll(async () => {
-  ({ server, baseURL } = await startRepoServer());
-});
-
-test.afterAll(async () => {
-  await stopRepoServer(server);
-});
-
-async function openApp(page) {
-  await page.addInitScript(() => {
-    window.__printCalls = 0;
-    window.print = () => { window.__printCalls += 1; };
-    window.__rejections = [];
-    window.addEventListener("unhandledrejection", (event) => {
-      window.__rejections.push(String((event.reason && event.reason.message) || event.reason));
-    });
-  });
-  await page.goto(baseURL);
-  await expect(page.locator("#inv-rows tr")).toHaveCount(7);
-}
-
-const persian = (n) => String(n).replace(/[0-9]/g, (d) => String.fromCharCode(d.charCodeAt(0) + 1728));
-const ROW_LABEL = {
-  description: "شرح کالا یا خدمت",
-  quantity: "تعداد یا مقدار",
-  unit: "واحد",
-  unitPrice: "مبلغ واحد"
-};
-const cell = (page, n, field) => page.getByLabel(`ردیف ${persian(n)} — ${ROW_LABEL[field]}`, { exact: true });
 const warnings = (page) => page.locator("#invoice-validation-list li");
 const warningTexts = (page) => page.evaluate(() =>
   Array.from(document.querySelectorAll("#invoice-validation-list li")).map((li) => li.textContent));
-
-async function fillValidFirstRow(page, price = "1000") {
-  await cell(page, 1, "description").fill("کالای آزمایشی");
-  await cell(page, 1, "quantity").fill("1");
-  await cell(page, 1, "unitPrice").fill(price);
-}
 
 // ---------------------------------------------------------------------------
 // Defect 1 — separators are only stripped when they really are grouping
@@ -714,7 +675,9 @@ test("deleting the currently open document marks the document dirty to guard aga
 });
 
 test("parsePercentBps and formatPercentBps are exported and round-trip correctly", async () => {
-  const p = await import("../js/persian-numbers.js");
+  // CommonJS default export: the module assigns one PersianNumbers object
+  // rather than re-listing every name (see js/persian-numbers.js).
+  const { default: p } = await import("../js/persian-numbers.js");
   expect(typeof p.parsePercentBps).toBe("function");
   expect(typeof p.formatPercentBps).toBe("function");
   expect(p.parsePercentBps("10")).toBe(1000n);

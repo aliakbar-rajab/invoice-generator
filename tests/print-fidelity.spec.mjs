@@ -8,38 +8,7 @@
  * the print clone, so wherever the two are solved separately they have to land
  * in the same place.
  */
-import { test, expect } from "@playwright/test";
-import { startRepoServer, stopRepoServer } from "./server-helper.mjs";
-
-let server;
-let baseURL;
-
-test.beforeAll(async () => {
-  ({ server, baseURL } = await startRepoServer());
-});
-
-test.afterAll(async () => {
-  await stopRepoServer(server);
-});
-
-async function openApp(page) {
-  await page.addInitScript(() => {
-    window.__printCalls = 0;
-    window.print = () => { window.__printCalls += 1; };
-  });
-  await page.goto(baseURL);
-  await expect(page.locator("#inv-rows tr")).toHaveCount(7);
-}
-
-const persian = (value) =>
-  String(value).replace(/[0-9]/g, (digit) => String.fromCharCode(digit.charCodeAt(0) + 1728));
-
-async function fillRow(page, index, description, quantity, price) {
-  const n = persian(index);
-  await page.getByLabel(`ردیف ${n} — شرح کالا یا خدمت`, { exact: true }).fill(description);
-  await page.getByLabel(`ردیف ${n} — تعداد یا مقدار`, { exact: true }).fill(quantity);
-  await page.getByLabel(`ردیف ${n} — مبلغ واحد`, { exact: true }).fill(price);
-}
+import { test, expect, openApp, persian, fillRow } from "./fixtures.mjs";
 
 async function printAndMeasure(page) {
   await page.getByRole("button", { name: "چاپ / PDF", exact: true }).click();

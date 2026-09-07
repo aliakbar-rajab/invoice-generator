@@ -530,25 +530,24 @@
 .row-delete:focus-visible { border-color: #dca3a8; background: #fff0f1; color: #a02531; outline: none; }
 
 /* Application dialogs */
-.app-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: grid;
-  place-items: center;
-  padding: 20px;
+/* Native <dialog> opened with showModal(): the browser supplies the modal
+   backdrop, the focus trap, Escape-to-close, background inertness and focus
+   restore, so none of those are hand-rolled here or in app.js any more. */
+.app-dialog::backdrop {
   background: rgb(10 11 14 / 58%);
-  font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
 }
-.app-dialog-backdrop[hidden] { display: none; }
 .app-dialog {
   width: min(470px, 96vw);
+  max-height: calc(100dvh - 40px);
   padding: 20px;
+  border: none;
   border-radius: 12px;
   background: #fff;
   color: #202124;
   box-shadow: 0 22px 60px rgb(0 0 0 / 35%);
+  font-family: "Vazirmatn", Tahoma, Arial, sans-serif;
 }
+.app-dialog:not([open]) { display: none; }
 .app-dialog h2 { margin: 0 0 8px; font-size: 17px; }
 .app-dialog p { margin: 0; color: #555860; font-size: 13px; line-height: 1.75; white-space: pre-line; }
 .app-dialog ul { margin: 10px 0 0; padding-inline-start: 22px; color: #9b2832; font-size: 12px; line-height: 1.8; }
@@ -667,7 +666,6 @@
   .toolbar-brand { display: none; }
   .toolbar-company-control { flex: 1 1 190px; }
   .toolbar-document-block { flex: 1 1 100%; order: 10; margin-top: 4px; padding-inline: 0; border-inline-start: none; }
-  .toolbar-document-title-line { display: none; }
   .toolbar-live-total { min-width: 120px; flex: 1 1 120px; }
   .toolbar-quickbar { align-items: stretch; }
   .toolbar-actions { width: 100%; }

@@ -1,6 +1,10 @@
 /*
- * Static file server shared by the Playwright specs — serves the repo root
- * exactly like a plain static host would, restricted to files inside it.
+ * Static file server for the Playwright run — serves the repo root exactly
+ * like a plain static host would, restricted to files inside it.
+ *
+ * Started once per run by playwright.config.mjs (`webServer`), which runs this
+ * file directly; specs reach it through `use.baseURL` rather than starting
+ * one each.
  */
 import http from "node:http";
 import { readFile } from "node:fs/promises";
@@ -8,6 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+export const PORT = Number(process.env.PORT || 4173);
 
 const contentTypes = {
   ".css": "text/css; charset=utf-8",
@@ -20,30 +25,21 @@ const contentTypes = {
   ".woff2": "font/woff2"
 };
 
-export function startRepoServer() {
-  const server = http.createServer(async (request, response) => {
-    try {
-      const pathname = decodeURIComponent(new URL(request.url, "http://127.0.0.1").pathname);
-      const relative = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
-      const target = path.resolve(repoRoot, relative);
-      if (!target.startsWith(repoRoot + path.sep)) throw new Error("outside root");
-      const body = await readFile(target);
-      response.writeHead(200, { "Content-Type": contentTypes[path.extname(target)] || "application/octet-stream" });
-      response.end(body);
-    } catch {
-      response.writeHead(404);
-      response.end("Not found");
-    }
-  });
-  return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      resolve({ server, baseURL: `http://127.0.0.1:${address.port}` });
-    });
-  });
-}
+const server = http.createServer(async (request, response) => {
+  try {
+    const pathname = decodeURIComponent(new URL(request.url, "http://127.0.0.1").pathname);
+    const relative = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
+    const target = path.resolve(repoRoot, relative);
+    if (!target.startsWith(repoRoot + path.sep)) throw new Error("outside root");
+    const body = await readFile(target);
+    response.writeHead(200, { "Content-Type": contentTypes[path.extname(target)] || "application/octet-stream" });
+    response.end(body);
+  } catch {
+    response.writeHead(404);
+    response.end("Not found");
+  }
+});
 
-export function stopRepoServer(server) {
-  if (!server) return Promise.resolve();
-  return new Promise((resolve) => server.close(resolve));
-}
+server.listen(PORT, "127.0.0.1", () => {
+  console.log(`serving ${repoRoot} on http://127.0.0.1:${PORT}`);
+});

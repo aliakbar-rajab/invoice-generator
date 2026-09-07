@@ -44,6 +44,17 @@ const CUSTOMER_DETAIL_FIELDS = [
   { step: "customer_detail_phone", stateKey: "buyerPhone", prompt: "☎️ تلفن مشتری را وارد کنید:" },
 ];
 
+// Steps whose prompt is just a line of text plus the back/cancel keyboard.
+// promptForStep is the single sender: the flow handlers that advance INTO one
+// of these call it rather than repeating the string, so "back" and the
+// forward path can never drift apart.
+const SIMPLE_STEP_PROMPTS = {
+  custom_company_name: "🏢 نام شرکت را وارد کنید:",
+  customer_name: "👤 نام مشتری (خریدار) را وارد کنید:",
+  item_quantity: "🔢 تعداد یا مقدار را وارد کنید (مثال: ۱۰ یا ۲.۵):",
+  item_price: "💰 مبلغ واحد را به ریال وارد کنید (مثال: ۱۵۰۰۰۰۰):",
+};
+
 function isCustomerDetailStep(step) {
   return CUSTOMER_DETAIL_FIELDS.some((f) => f.step === step);
 }
@@ -300,9 +311,7 @@ export class InvoiceSession extends DurableObject {
     });
     await this.saveState(next);
     await sendMessage(token, chatId, `✅ نام شرکت ثبت شد: ${escapeHtml(name)}`);
-    await sendMessage(token, chatId, "👤 نام مشتری (خریدار) را وارد کنید:", {
-      reply_markup: backAndCancelKeyboard(),
-    });
+    await this.promptForStep(chatId, token, next);
   }
 
   async onCustomerDetailField(chatId, token, state, text) {
@@ -338,9 +347,7 @@ export class InvoiceSession extends DurableObject {
       return s;
     });
     await this.saveState(next);
-    await sendMessage(token, chatId, "🔢 تعداد یا مقدار را وارد کنید (مثال: ۱۰ یا ۲.۵):", {
-      reply_markup: backAndCancelKeyboard(),
-    });
+    await this.promptForStep(chatId, token, next);
   }
 
   async onItemQuantity(chatId, token, state, text) {
@@ -363,9 +370,7 @@ export class InvoiceSession extends DurableObject {
       return s;
     });
     await this.saveState(next);
-    await sendMessage(token, chatId, "💰 مبلغ واحد را به ریال وارد کنید (مثال: ۱۵۰۰۰۰۰):", {
-      reply_markup: backAndCancelKeyboard(),
-    });
+    await this.promptForStep(chatId, token, next);
   }
 
   async onItemPrice(chatId, token, state, text) {
@@ -475,9 +480,7 @@ export class InvoiceSession extends DurableObject {
         return s;
       });
       await this.saveState(state);
-      await sendMessage(token, chatId, "🏢 نام شرکت را وارد کنید:", {
-        reply_markup: backAndCancelKeyboard(),
-      });
+      await this.promptForStep(chatId, token, state);
       return true;
     }
 
@@ -491,9 +494,7 @@ export class InvoiceSession extends DurableObject {
       });
       await this.saveState(state);
       await sendMessage(token, chatId, `✅ شرکت انتخاب شد: ${getCompany(key).label}`);
-      await sendMessage(token, chatId, "👤 نام مشتری (خریدار) را وارد کنید:", {
-        reply_markup: backAndCancelKeyboard(),
-      });
+      await this.promptForStep(chatId, token, state);
       return true;
     }
 
@@ -538,14 +539,10 @@ export class InvoiceSession extends DurableObject {
     }
 
     if (data === "additem:yes" && state.step === "item_more") {
+      // promptItemMore owns the at-cap case: it says so and moves the
+      // conversation to ask_stamp itself, so this only handles the normal path.
       if (state.items.length >= MAX_ITEMS) {
-        await sendMessage(token, chatId, `❗️حداکثر ${toPersianDigits(MAX_ITEMS)} قلم کالا در هر فاکتور مجاز است.`);
-        state = this.advance(state, (s) => {
-          s.step = "ask_stamp";
-          return s;
-        });
-        await this.saveState(state);
-        await this.promptStamp(chatId, token);
+        await this.promptItemMore(chatId, token, state);
         return true;
       }
       state = this.advance(state, (s) => {
@@ -682,6 +679,11 @@ export class InvoiceSession extends DurableObject {
 
   // Re-sends whatever prompt matches state.step — used after "back".
   async promptForStep(chatId, token, state) {
+    const simple = SIMPLE_STEP_PROMPTS[state.step];
+    if (simple) {
+      await sendMessage(token, chatId, simple, { reply_markup: backAndCancelKeyboard() });
+      return;
+    }
     switch (state.step) {
       case "idle":
         await sendMessage(token, chatId, "برای شروع صدور پیش‌فاکتور، «➕ فاکتور جدید» را بزنید.", {
@@ -690,16 +692,6 @@ export class InvoiceSession extends DurableObject {
         return;
       case "choose_company":
         await this.promptChooseCompany(chatId, token);
-        return;
-      case "custom_company_name":
-        await sendMessage(token, chatId, "🏢 نام شرکت را وارد کنید:", {
-          reply_markup: backAndCancelKeyboard(),
-        });
-        return;
-      case "customer_name":
-        await sendMessage(token, chatId, "👤 نام مشتری (خریدار) را وارد کنید:", {
-          reply_markup: backAndCancelKeyboard(),
-        });
         return;
       case "customer_action":
         await this.promptCustomerAction(chatId, token);
@@ -712,16 +704,6 @@ export class InvoiceSession extends DurableObject {
         return;
       case "item_description":
         await this.promptItemDescription(chatId, token, state);
-        return;
-      case "item_quantity":
-        await sendMessage(token, chatId, "🔢 تعداد یا مقدار را وارد کنید (مثال: ۱۰ یا ۲.۵):", {
-          reply_markup: backAndCancelKeyboard(),
-        });
-        return;
-      case "item_price":
-        await sendMessage(token, chatId, "💰 مبلغ واحد را به ریال وارد کنید (مثال: ۱۵۰۰۰۰۰):", {
-          reply_markup: backAndCancelKeyboard(),
-        });
         return;
       case "item_more":
         await this.promptItemMore(chatId, token);

@@ -163,20 +163,6 @@
     BUILT_IN_PROFILE_DEFAULTS[key] = Object.assign({}, COMPANY_PROFILES[key]);
   });
 
-  // ---------- Document fonts ----------
-  // One approved corporate typeface. The user-facing font picker is gone and
-  // the per-font html[data-font] selectors with it — invoice.css now sets
-  // --doc-font on :root unconditionally. The key is still written to
-  // html[data-font] at boot (see setFont) and still recorded in saved
-  // documents, purely so older files keep round-tripping unchanged.
-  var DEFAULT_FONT_KEY = "vazirmatn";
-
-  // ---------- Document font size ----------
-  // A plain multiplier on --doc-font-scale (see invoice.css), set directly
-  // as an inline custom property rather than a data-attribute since it's a
-  // continuous percentage. Fixed at 1 since the size picker was removed.
-  var DEFAULT_FONT_SCALE = 1;
-
   // ---------- Invoice validity ("اعتبار پیش‌فاکتور") ----------
   // Keys match the header select's values (see index.html #meta-validity-mode).
   // "today"/"tomorrow" resolve to a value the app fills in itself;
@@ -290,54 +276,15 @@
   // ---------- Application dialog ----------
 
   var activeDialogResolve = null;
-  var dialogPreviousFocus = null;
 
+  // <dialog>.close() restores focus to whatever opened the dialog and releases
+  // the browser's own focus trap, so neither is tracked here.
   function closeAppDialog(result) {
-    if (appDialogEl.hidden) return;
-    appDialogEl.hidden = true;
+    if (!appDialogEl.open) return;
+    appDialogEl.close();
     var resolve = activeDialogResolve;
     activeDialogResolve = null;
     if (resolve) resolve(result || { action: "cancel", value: "" });
-    if (dialogPreviousFocus && typeof dialogPreviousFocus.focus === "function") {
-      try { dialogPreviousFocus.focus(); } catch (err) {}
-      dialogPreviousFocus = null;
-    }
-  }
-
-  var DIALOG_FOCUSABLE_SELECTOR =
-    'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
-
-  // offsetParent is null for anything display:none (or an ancestor that is),
-  // which is exactly how hidden dialog rows (the reset/delete buttons,
-  // is-empty fields) are excluded here without special-casing them.
-  function focusableDialogElements(container) {
-    var nodes = container.querySelectorAll(DIALOG_FOCUSABLE_SELECTOR);
-    return Array.prototype.filter.call(nodes, function (el) {
-      return el.offsetParent !== null;
-    });
-  }
-
-  // #app-dialog and #company-editor-dialog are both aria-modal="true", which
-  // is a lie unless Tab is actually kept inside them — otherwise it walks
-  // straight into the (visually hidden-behind-backdrop but still focusable)
-  // page underneath. Only one of the two is ever open at a time.
-  function trapDialogTab(e) {
-    var dialog = !appDialogEl.hidden ? appDialogEl : (!companyEditorDialogEl.hidden ? companyEditorDialogEl : null);
-    if (!dialog) return;
-    var focusable = focusableDialogElements(dialog);
-    if (!focusable.length) return;
-    var first = focusable[0];
-    var last = focusable[focusable.length - 1];
-    var active = document.activeElement;
-    if (e.shiftKey) {
-      if (active === first || !dialog.contains(active)) {
-        e.preventDefault();
-        last.focus();
-      }
-    } else if (active === last || !dialog.contains(active)) {
-      e.preventDefault();
-      first.focus();
-    }
   }
 
   function showAppDialog(options) {
@@ -378,7 +325,6 @@
 
     return new Promise(function (resolve) {
       activeDialogResolve = resolve;
-      dialogPreviousFocus = document.activeElement;
       actions.forEach(function (action) {
         var button = document.createElement("button");
         button.type = "button";
@@ -390,7 +336,7 @@
         });
         dialogActionsEl.appendChild(button);
       });
-      appDialogEl.hidden = false;
+      if (!appDialogEl.open) appDialogEl.showModal();
       window.setTimeout(function () {
         if (hasInput) {
           dialogInputEl.focus();
@@ -1173,8 +1119,6 @@
       version: 7,
       orientation: "landscape",
       headerGray: true,
-      font: DEFAULT_FONT_KEY,
-      fontScale: DEFAULT_FONT_SCALE,
       meta: {
         title: "پیش‌فاکتور",
         date: invoiceDate,
@@ -1443,23 +1387,21 @@
     });
   }
 
-  var companyEditorPreviousFocus = null;
-
   function closeCompanyEditor() {
-    companyEditorDialogEl.hidden = true;
+    if (companyEditorDialogEl.open) companyEditorDialogEl.close();
+  }
+
+  // Runs for every way the editor can close — the انصراف button, Escape, or a
+  // click on the backdrop — which is why the cleanup lives here rather than in
+  // closeCompanyEditor.
+  function onCompanyEditorClosed() {
     companyEditorErrorEl.hidden = true;
     companyLogoFileEl.value = "";
     if (companyStampFileEl) companyStampFileEl.value = "";
-    if (companyEditorPreviousFocus && typeof companyEditorPreviousFocus.focus === "function") {
-      try {
-        if (companyEditorPreviousFocus.offsetParent !== null) {
-          companyEditorPreviousFocus.focus();
-        } else if (settingsBtnEl && typeof settingsBtnEl.focus === "function") {
-          settingsBtnEl.focus();
-        }
-      } catch (err) {}
-      companyEditorPreviousFocus = null;
-    }
+    // <dialog> restores focus to whatever opened it. That opener sits inside
+    // the settings panel, which the editor may have closed on its way open, so
+    // fall back to the settings button when it is no longer focusable.
+    if (document.activeElement === document.body && settingsBtnEl) settingsBtnEl.focus();
   }
 
   function setCompanyEditorFieldValue(field, value) {
@@ -1469,7 +1411,6 @@
   }
 
   function openCompanyEditor(mode) {
-    companyEditorPreviousFocus = document.activeElement;
     var selectedKey = profileSelectEl.value;
     var editingExisting = mode === "edit" && !isCustomProfile(selectedKey);
     var adHoc = isCustomProfile(selectedKey);
@@ -1516,7 +1457,7 @@
       companyEditorDeleteEl.hidden = !(editingExisting && !!profile.userCreated && !BUILT_IN_PROFILE_DEFAULTS[selectedKey]);
     }
     closeSettingsPanel();
-    companyEditorDialogEl.hidden = false;
+    companyEditorDialogEl.showModal();
   }
 
   function saveCompanyProfileFromEditor() {
@@ -1699,23 +1640,6 @@
     var available = document.documentElement.clientWidth - 32; // viewport padding
     var scale = Math.min(1, available / sheetWidthPx);
     scaleWrapperEl.style.zoom = scale >= 1 ? "" : String(scale);
-  }
-
-  // ---------- Document font ----------
-
-  // Both of these normalize a loaded document onto the single approved
-  // typeface and scale: any `font` / `fontScale` carried by an older saved
-  // file is deliberately ignored. The picker UI they used to drive is gone.
-  // --doc-font-scale is still consumed by invoice.css; html[data-font] no
-  // longer is, and is kept only so the attribute stays present for anything
-  // inspecting the document.
-  function setFont() {
-    document.documentElement.setAttribute("data-font", DEFAULT_FONT_KEY);
-  }
-
-  function setFontScale() {
-    document.documentElement.style.setProperty("--doc-font-scale", DEFAULT_FONT_SCALE);
-    return DEFAULT_FONT_SCALE;
   }
 
   // ---------- Numeric auto-fit ----------
@@ -1953,54 +1877,12 @@
     });
   }
 
-  // An integer part is either bare digits, or 1-3 digits followed by complete
-  // 3-digit groups joined by ONE consistent separator — "1000", "1,000",
-  // "1٬000٬000", "1 000 000". Anything else that merely contains a separator
-  // is not a grouped number.
-  var STRICT_UNGROUPED_INT = /^\d+$/;
-  var STRICT_GROUPED_INT = /^\d{1,3}(?:([,٬\s])\d{3})(?:\1\d{3})*$/;
-
-  // Normalizes a user-typed numeric string to plain ASCII digits with a "."
-  // decimal point, or returns null when the text is not a well-formed number.
-  //
-  // Grouping separators are stripped only after the grouping they claim to
-  // express has been verified. Stripping "," / "٬" / spaces unconditionally
-  // (as this did) turned "1,5" into 15 — and a comma is exactly what many
-  // keyboards and locales produce for a DECIMAL point, so money, quantities
-  // and the tax rate were silently multiplied by ten with no warning, while
-  // the equivalent "1.5" was correctly rejected. The app's own formatted
-  // output ("۱٬۰۰۰٬۰۰۰", "۱٬۲۳۴٫۵۶۷") still round-trips unchanged.
-  //
-  // "" means genuinely empty; null means malformed. Callers must keep those
-  // apart: an empty tax rate legitimately means zero, while a malformed one
-  // must never be quietly treated as one.
-  function normalizeStrictNumber(value) {
-    if (typeof window !== "undefined" && window.PersianNumbers && typeof window.PersianNumbers.normalizeStrictNumber === "function") {
-      return window.PersianNumbers.normalizeStrictNumber(value);
-    }
-    if (typeof window !== "undefined" && typeof window.normalizeStrictNumber === "function") {
-      return window.normalizeStrictNumber(value);
-    }
-    var raw = toAsciiDigits(String(value == null ? "" : value)).trim().replace(/٫/g, ".");
-    if (!raw) return "";
-    var sign = "";
-    if (raw.charAt(0) === "-") {
-      sign = "-";
-      raw = raw.slice(1);
-    }
-    var pieces = raw.split(".");
-    if (pieces.length > 2) return null;
-    var intPart = pieces[0];
-    var fracPart = pieces.length > 1 ? pieces[1] : null;
-    if (!intPart && fracPart !== null) {
-      intPart = "0";
-    } else if (!STRICT_UNGROUPED_INT.test(intPart) && !STRICT_GROUPED_INT.test(intPart)) {
-      return null;
-    }
-    // Grouping inside the fractional part is never meaningful ("1.0,5").
-    if (fracPart !== null && !/^\d*$/.test(fracPart)) return null;
-    return sign + intPart.replace(/[,٬\s]/g, "") + (fracPart === null ? "" : "." + fracPart);
-  }
+  // normalizeStrictNumber, parseDecimalToBigIntScaled and the parse*/format*
+  // helpers used below all come from js/persian-numbers.js, which index.html
+  // loads as a classic script before this one. See that file for what ""
+  // (genuinely empty) and null (malformed) mean — callers must keep them
+  // apart, since an empty tax rate legitimately means zero while a malformed
+  // one must never be quietly treated as one.
 
   function strictMoney(value) {
     var normalized = normalizeStrictNumber(value);
@@ -2214,7 +2096,7 @@
   var authoritativeActionBusy = false;
 
   function modalDialogIsOpen() {
-    return !appDialogEl.hidden || !companyEditorDialogEl.hidden;
+    return appDialogEl.open || companyEditorDialogEl.open;
   }
 
   function blockAuthoritativeAction(actionLabel) {
@@ -2349,8 +2231,6 @@
       version: 7,
       orientation: currentOrientation(),
       headerGray: sheet.classList.contains("header-gray"),
-      font: DEFAULT_FONT_KEY,
-      fontScale: DEFAULT_FONT_SCALE,
       meta: {},
       buyer: {},
       seller: {},
@@ -2423,8 +2303,6 @@
     var data = {
       orientation: dataOrientation,
       headerGray: raw && raw.headerGray != null ? !!raw.headerGray : defaults.headerGray,
-      font: DEFAULT_FONT_KEY,
-      fontScale: DEFAULT_FONT_SCALE,
       meta: Object.assign({}, defaults.meta, raw && raw.meta),
       buyer: Object.assign({}, defaults.buyer, raw && raw.buyer),
       seller: sellerData,
@@ -2500,8 +2378,6 @@
       createRow(row, { skipRecalc: true });
     });
     setOrientation(data.orientation);
-    setFont();
-    setFontScale();
     validationRequested = false;
     validationEl.hidden = true;
     dateIsAutoSuggested = false;
@@ -3073,15 +2949,6 @@
     return "";
   }
 
-  function readFileAsText(file) {
-    return new Promise(function (resolve, reject) {
-      var reader = new FileReader();
-      reader.onload = function () { resolve(String(reader.result)); };
-      reader.onerror = function () { reject(new Error("read failed")); };
-      reader.readAsText(file, "utf-8");
-    });
-  }
-
   function reportUnopenableFile(title, message, details) {
     return showAppDialog({
       title: title,
@@ -3099,7 +2966,8 @@
   async function openFromFile(file) {
     var text;
     try {
-      text = await readFileAsText(file);
+      // Blob.text() decodes as UTF-8, which is what readAsText(file, "utf-8") did.
+      text = await file.text();
     } catch (err) {
       await reportUnopenableFile("خطا در خواندن فایل", "خواندن فایل «" + file.name + "» ممکن نشد. سند فعلی بدون تغییر باقی ماند.");
       return false;
@@ -3253,7 +3121,7 @@
     clone.classList.add("print-page");
     clone.classList.remove("orientation-landscape", "orientation-portrait");
     clone.classList.add("orientation-" + options.orientation);
-    // Capacity probes (see maxFittingPrefix) ask for the tightest rhythm on
+    // Capacity probes (see maxFittingRun) ask for the tightest rhythm on
     // purpose: how many rows a sheet can carry is a question about its floor,
     // not about the setting it will eventually be printed at. Pages that are
     // actually printed get their own solved rhythm in realizePrintPlan.
@@ -3523,27 +3391,20 @@
     return fitMountedPage(page, rows.length);
   }
 
-  function maxFittingPrefix(rows, options) {
+  // How many rows, taken from one end, still fit on a page under `options`.
+  // `take` is what makes it an end: the first i rows, or the last i.
+  function maxFittingRun(rows, take, options) {
     var count = 0;
     var limit = Math.min(rows.length, options.maxRows || rows.length);
     for (var i = 1; i <= limit; i += 1) {
-      var candidate = clonePrintPage(rows.slice(0, i), options);
-      if (!pageFits(candidate)) break;
+      if (!pageFits(clonePrintPage(take(rows, i), options))) break;
       count = i;
     }
     return count;
   }
 
-  function maxFittingSuffix(rows, options) {
-    var count = 0;
-    var limit = Math.min(rows.length, options.maxRows || rows.length);
-    for (var i = 1; i <= limit; i += 1) {
-      var candidate = clonePrintPage(rows.slice(rows.length - i), options);
-      if (!pageFits(candidate)) break;
-      count = i;
-    }
-    return count;
-  }
+  function takePrefix(rows, i) { return rows.slice(0, i); }
+  function takeSuffix(rows, i) { return rows.slice(rows.length - i); }
 
   // Why the closing block (notes + amount-in-words + totals + signatures +
   // footer) could not be fitted onto a final page. If that same page fits
@@ -3574,7 +3435,7 @@
     // breaks is a question about how much a sheet can carry at its floor, and
     // each of the resulting pages is then solved for its own balanced setting
     // by realizePrintPlan.
-    var finalCount = maxFittingSuffix(rows, {
+    var finalCount = maxFittingRun(rows, takeSuffix, {
       orientation: orientation,
       density: 0,
       continuation: true,
@@ -3619,7 +3480,7 @@
     var startIndex = 0;
 
     while (remaining.length) {
-      var capacity = maxFittingPrefix(remaining, {
+      var capacity = maxFittingRun(remaining, takePrefix, {
         orientation: orientation,
         density: 0,
         continuation: !first,
@@ -4241,8 +4102,23 @@
         setStatus("شرکت «" + (profile.label || profile.name) + "» حذف شد.");
       });
     }
+    // A click that lands on the dialog element itself is a click on its
+    // backdrop — the content sits in child elements.
     companyEditorDialogEl.addEventListener("click", function (e) {
       if (e.target === companyEditorDialogEl) closeCompanyEditor();
+    });
+    companyEditorDialogEl.addEventListener("close", onCompanyEditorClosed);
+
+    // Escape closes a <dialog> without going through closeAppDialog, so the
+    // outstanding promise is settled here instead. In the normal path
+    // closeAppDialog has already cleared it and this is a no-op.
+    appDialogEl.addEventListener("close", function () {
+      var resolve = activeDialogResolve;
+      activeDialogResolve = null;
+      if (resolve) resolve({ action: "cancel", value: "" });
+    });
+    appDialogEl.addEventListener("click", function (e) {
+      if (e.target === appDialogEl) closeAppDialog({ action: "cancel", value: "" });
     });
     companyEditorFormEl.addEventListener("submit", function (e) {
       e.preventDefault();
@@ -4423,12 +4299,10 @@
           printInvoice();
         }
       } else if (e.key === "Escape") {
-        if (!appDialogEl.hidden) closeAppDialog({ action: "cancel", value: "" });
-        if (!companyEditorDialogEl.hidden) closeCompanyEditor();
+        // The dialogs close themselves (and fire "cancel", wired below); only
+        // the two non-modal overlay panels need handling here.
         closeSavedPanel();
         closeSettingsPanel();
-      } else if (e.key === "Tab") {
-        trapDialogTab(e);
       }
     });
 

@@ -351,8 +351,7 @@
 
 <div class="print-document" id="print-document" aria-hidden="true"></div>
 
-<div class="app-dialog-backdrop no-print" id="app-dialog" hidden>
-  <section class="app-dialog" role="dialog" aria-modal="true" aria-labelledby="app-dialog-title" aria-describedby="app-dialog-message">
+<dialog class="app-dialog no-print" id="app-dialog" aria-labelledby="app-dialog-title" aria-describedby="app-dialog-message">
     <h2 id="app-dialog-title"></h2>
     <p id="app-dialog-message"></p>
     <ul id="app-dialog-details" hidden></ul>
@@ -361,11 +360,9 @@
       <input type="text" id="app-dialog-input" autocomplete="off" />
     </label>
     <div class="app-dialog-actions" id="app-dialog-actions"></div>
-  </section>
-</div>
+</dialog>
 
-<div class="app-dialog-backdrop no-print" id="company-editor-dialog" hidden>
-  <section class="app-dialog company-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="company-editor-title" aria-describedby="company-editor-description">
+<dialog class="app-dialog company-editor-dialog no-print" id="company-editor-dialog" aria-labelledby="company-editor-title" aria-describedby="company-editor-description">
     <form id="company-editor-form" autocomplete="off">
       <h2 id="company-editor-title">ثبت شرکت جدید</h2>
       <p id="company-editor-description">اطلاعات این شرکت روی همین مرورگر ذخیره و به فهرست «شرکت صادرکننده» اضافه می‌شود.</p>
@@ -423,8 +420,7 @@
         <button type="submit" class="primary" id="btn-company-editor-submit">ثبت و انتخاب شرکت</button>
       </div>
     </form>
-  </section>
-</div>
+</dialog>
 
 <template id="row-template">
   <tr>
