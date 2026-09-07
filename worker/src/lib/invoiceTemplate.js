@@ -9,6 +9,7 @@ import {
   toPersianDigits,
 } from "./persianNumbers.js";
 import { escapeHtml } from "./html.js";
+import { computeTotals, taxBasisPointsFrom } from "./invoiceTotals.js";
 
 const METER_ICON = `<svg class="inv-meta-icon" viewBox="0 0 24 24"><path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg>`;
 const NUMBER_ICON = `<svg class="inv-meta-icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></svg>`;
@@ -45,34 +46,6 @@ function chunkItems(lines, perPage) {
   }
   chunks.push(lines.slice(lines.length - finalCount));
   return chunks;
-}
-
-// Computes per-item and invoice-level totals as exact BigInt Rial amounts.
-// quantityMilli/unitPriceRial are already-parsed BigInts (see persianNumbers).
-export function computeTotals(items, taxPercent = 0) {
-  const lines = items.map((item) => {
-    const lineTotal = bigRoundDiv(item.quantityMilli * item.unitPriceRial, 1000n);
-    return { ...item, lineTotal };
-  });
-  const grossTotal = lines.reduce((sum, l) => sum + l.lineTotal, 0n);
-
-  let taxBasisPoints = 0n;
-  if (typeof taxPercent === "number" && !Number.isNaN(taxPercent) && Number.isFinite(taxPercent)) {
-    taxBasisPoints = BigInt(Math.max(0, Math.round(taxPercent * 100)));
-  } else if (taxPercent != null) {
-    // A string is what the desktop app's own tax field produces ("۱۰"), and
-    // BigInt() choking on Persian digits is what used to throw RangeError
-    // here; see the regression test of the same name.
-    const normalized = toAsciiDigits(String(taxPercent).trim()).replace(/٫/g, ".");
-    // parseDecimalToBigIntScaled returns 0n for anything it cannot read, never
-    // null, so the only check worth making is the sign one.
-    const parsed = parseDecimalToBigIntScaled(normalized, 2);
-    if (parsed > 0n) taxBasisPoints = parsed;
-  }
-
-  const taxTotal = bigRoundDiv(grossTotal * taxBasisPoints, 10000n);
-  const netTotal = grossTotal + taxTotal;
-  return { lines, grossTotal, taxTotal, netTotal };
 }
 
 function partyField(label, value, ltr) {
@@ -139,7 +112,7 @@ export function buildInvoiceHtml(data) {
     includeStamp,
     taxPercent = 0,
   } = data;
-  const { lines, grossTotal, taxTotal, netTotal } = computeTotals(items, taxPercent);
+  const { lines, grossTotal, taxTotal, netTotal } = computeTotals(items, taxBasisPointsFrom(taxPercent));
 
   const logoImg = company.logoDataUri
     ? `<img class="inv-logo" alt="آرم شرکت" src="${company.logoDataUri}" />`

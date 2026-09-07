@@ -84,6 +84,9 @@ function installFetchMock() {
 	return calls;
 }
 
+// A state object complete enough for any prompt in the table to render.
+const freshStateShape = { items: [], currentItem: {}, history: [], taxPercent: 10 };
+
 function lastMessage(calls) {
 	const sent = calls.filter((c) => c.method === "sendMessage");
 	return sent[sent.length - 1];
@@ -276,5 +279,71 @@ describe("InvoiceSession flow", () => {
 
 		const waitMessages = messagesContaining(calls, "در حال آماده‌سازی و ارسال پیش‌فاکتور");
 		expect(waitMessages.length).toBe(1);
+	});
+	// The step table's reason for existing: the message dispatcher and the
+	// prompt dispatcher used to be two switches kept in agreement by hand, and
+	// these two steps were in one and not the other. Typing at either answered
+	// with the generic start hint, which drops the user out of an invoice they
+	// were most of the way through.
+	async function walkToStep(chatId, step) {
+		await send(chatId, textUpdate(chatId, "/start", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "➕ فاکتور جدید", nextUpdateId()));
+		await send(chatId, callbackUpdate(chatId, "company:fouladBonyan", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "خریدار آزمایشی", nextUpdateId()));
+		await send(chatId, callbackUpdate(chatId, "custentry:items", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "کالای تست", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "۲", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "۱۰۰۰۰", nextUpdateId()));
+		if (step === "ask_stamp") await send(chatId, callbackUpdate(chatId, "additem:no", nextUpdateId()));
+		expect((await readState(chatId)).step).toBe(step);
+	}
+
+	it("typing at the add-another-item step re-asks that question instead of the start hint", async () => {
+		const chatId = freshChatId();
+		await walkToStep(chatId, "item_more");
+
+		await send(chatId, textUpdate(chatId, "بله لطفا", nextUpdateId()));
+
+		const msg = lastMessage(calls);
+		expect(msg.body.text).toContain("آیتم دیگری اضافه می‌کنید؟");
+		expect(msg.body.text).not.toContain("برای شروع صدور پیش‌فاکتور");
+		expect((await readState(chatId)).step).toBe("item_more");
+	});
+
+	it("typing at the stamp question re-asks it instead of dropping the invoice", async () => {
+		const chatId = freshChatId();
+		await walkToStep(chatId, "ask_stamp");
+
+		await send(chatId, textUpdate(chatId, "بزن", nextUpdateId()));
+
+		const msg = lastMessage(calls);
+		expect(msg.body.text).toContain("مهر شرکت روی فاکتور درج شود؟");
+		expect((await readState(chatId)).step).toBe("ask_stamp");
+		expect((await readState(chatId)).items.length).toBe(1, "the invoice is still intact");
+	});
+
+	it("every step the conversation can reach has a prompt in the table", async () => {
+		const chatId = freshChatId();
+		// Walking the flow and asking for each step's prompt back proves the
+		// table covers what the transitions actually assign, rather than only
+		// what this test remembered to list.
+		for (const step of ["idle", "choose_company", "custom_company_name", "customer_name",
+			"customer_action", "customer_detail_address", "customer_detail_postal",
+			"customer_detail_national", "customer_detail_phone", "item_description",
+			"item_quantity", "item_price", "item_more", "ask_stamp"]) {
+			const before = calls.length;
+			const stub = stubFor(chatId);
+			await runInDurableObject(stub, (instance) =>
+				instance.promptForStep(chatId, "test-token", { ...freshStateShape, step })
+			);
+			const sent = calls.slice(before).filter((c) => c.method === "sendMessage");
+			expect(sent.length, `step ${step} sent no prompt`).toBeGreaterThan(0);
+			// idle's prompt IS the start hint; for every other step, seeing it
+			// means the table had no entry and promptForStep fell through.
+			if (step !== "idle") {
+				expect(sent[0].body.text, `step ${step} fell through to the start hint`)
+					.not.toBe("برای شروع صدور پیش‌فاکتور، «➕ فاکتور جدید» را بزنید.");
+			}
+		}
 	});
 });

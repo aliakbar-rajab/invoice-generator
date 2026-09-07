@@ -44,16 +44,7 @@ const CUSTOMER_DETAIL_FIELDS = [
   { step: "customer_detail_phone", stateKey: "buyerPhone", prompt: "☎️ تلفن مشتری را وارد کنید:" },
 ];
 
-// Steps whose prompt is just a line of text plus the back/cancel keyboard.
-// promptForStep is the single sender: the flow handlers that advance INTO one
-// of these call it rather than repeating the string, so "back" and the
-// forward path can never drift apart.
-const SIMPLE_STEP_PROMPTS = {
-  custom_company_name: "🏢 نام شرکت را وارد کنید:",
-  customer_name: "👤 نام مشتری (خریدار) را وارد کنید:",
-  item_quantity: "🔢 تعداد یا مقدار را وارد کنید (مثال: ۱۰ یا ۲.۵):",
-  item_price: "💰 مبلغ واحد را به ریال وارد کنید (مثال: ۱۵۰۰۰۰۰):",
-};
+const START_HINT = "برای شروع صدور پیش‌فاکتور، «➕ فاکتور جدید» را بزنید.";
 
 function isCustomerDetailStep(step) {
   return CUSTOMER_DETAIL_FIELDS.some((f) => f.step === step);
@@ -108,6 +99,81 @@ function customerDetailKeyboard() {
     [{ text: "⏭ رد کردن این مورد", callback_data: "custdetail:skip" }],
     [{ text: "📦 ورود اقلام کالا", callback_data: "custdetail:items" }],
   ]);
+}
+
+/*
+ * THE STEP TABLE — every state this conversation can be in, in one place.
+ *
+ * Each entry answers the two questions that used to be answered by two
+ * separate switches, one in handleMessage and one in promptForStep, which had
+ * to be kept in agreement by hand:
+ *
+ *   prompt  what to send on arriving here, and again on «🔙 بازگشت»
+ *   onText  what a typed message means here
+ *
+ * An entry with no `onText` does not take typed input, and that is a statement
+ * rather than an omission: handleMessage re-sends the step's own prompt. The
+ * two switches disagreed about exactly this — `item_more` and `ask_stamp` were
+ * in the prompt switch and missing from the message switch, so typing anything
+ * at either one answered with the generic start hint and lost the user's place
+ * mid-invoice.
+ *
+ * A step's prompt is written once here, so the forward path and «بازگشت»
+ * cannot drift apart.
+ */
+function textPrompt(message) {
+  return (session, chatId, token) =>
+    sendMessage(token, chatId, message, { reply_markup: backAndCancelKeyboard() });
+}
+
+const STEPS = {
+  idle: {
+    prompt: (session, chatId, token) =>
+      sendMessage(token, chatId, START_HINT, { reply_markup: MAIN_MENU }),
+  },
+  choose_company: {
+    prompt: (session, chatId, token) => session.promptChooseCompany(chatId, token),
+  },
+  custom_company_name: {
+    prompt: textPrompt("🏢 نام شرکت را وارد کنید:"),
+    onText: (session, chatId, token, state, text) => session.onCustomCompanyName(chatId, token, state, text),
+  },
+  customer_name: {
+    prompt: textPrompt("👤 نام مشتری (خریدار) را وارد کنید:"),
+    onText: (session, chatId, token, state, text) => session.onCustomerName(chatId, token, state, text),
+  },
+  // Buttons only. Typed text re-asks the question, which is what the old
+  // message switch did here too, just spelled out as its own case.
+  customer_action: {
+    prompt: (session, chatId, token) => session.promptCustomerAction(chatId, token),
+  },
+  item_description: {
+    prompt: (session, chatId, token, state) => session.promptItemDescription(chatId, token, state),
+    onText: (session, chatId, token, state, text) => session.onItemDescription(chatId, token, state, text),
+  },
+  item_quantity: {
+    prompt: textPrompt("🔢 تعداد یا مقدار را وارد کنید (مثال: ۱۰ یا ۲.۵):"),
+    onText: (session, chatId, token, state, text) => session.onItemQuantity(chatId, token, state, text),
+  },
+  item_price: {
+    prompt: textPrompt("💰 مبلغ واحد را به ریال وارد کنید (مثال: ۱۵۰۰۰۰۰):"),
+    onText: (session, chatId, token, state, text) => session.onItemPrice(chatId, token, state, text),
+  },
+  item_more: {
+    prompt: (session, chatId, token, state) => session.promptItemMore(chatId, token, state),
+  },
+  ask_stamp: {
+    prompt: (session, chatId, token) => session.promptStamp(chatId, token),
+  },
+};
+
+// The four sequential customer-detail steps are the same step four times over,
+// so they are generated from the field list rather than written out again.
+for (const field of CUSTOMER_DETAIL_FIELDS) {
+  STEPS[field.step] = {
+    prompt: (session, chatId, token, state) => session.promptCustomerDetail(chatId, token, state.step),
+    onText: (session, chatId, token, state, text) => session.onCustomerDetailField(chatId, token, state, text),
+  };
 }
 
 export class InvoiceSession extends DurableObject {
@@ -244,39 +310,14 @@ export class InvoiceSession extends DurableObject {
       }
     }
 
-    if (isCustomerDetailStep(state.step)) {
-      await this.onCustomerDetailField(chatId, token, state, text);
+    // The table says whether this step takes typed input. A step that does not
+    // re-asks its own question rather than answering with the start hint.
+    const step = STEPS[state.step];
+    if (step && step.onText) {
+      await step.onText(this, chatId, token, state, text);
       return;
     }
-
-    switch (state.step) {
-      case "custom_company_name":
-        await this.onCustomCompanyName(chatId, token, state, text);
-        return;
-      case "customer_name":
-        await this.onCustomerName(chatId, token, state, text);
-        return;
-      case "customer_action":
-        await this.promptCustomerAction(chatId, token);
-        return;
-      case "item_description":
-        await this.onItemDescription(chatId, token, state, text);
-        return;
-      case "item_quantity":
-        await this.onItemQuantity(chatId, token, state, text);
-        return;
-      case "item_price":
-        await this.onItemPrice(chatId, token, state, text);
-        return;
-      default:
-        await sendMessage(
-          token,
-          chatId,
-          "برای شروع صدور پیش‌فاکتور، «➕ فاکتور جدید» را بزنید.",
-          { reply_markup: MAIN_MENU }
-        );
-        return;
-    }
+    await this.promptForStep(chatId, token, state);
   }
 
   async onCustomerName(chatId, token, state, text) {
@@ -677,49 +718,17 @@ export class InvoiceSession extends DurableObject {
     });
   }
 
-  // Re-sends whatever prompt matches state.step — used after "back".
+  // Re-sends whatever prompt matches state.step — used after "back", after a
+  // field is accepted, and for any button tap no handler claimed.
   async promptForStep(chatId, token, state) {
-    const simple = SIMPLE_STEP_PROMPTS[state.step];
-    if (simple) {
-      await sendMessage(token, chatId, simple, { reply_markup: backAndCancelKeyboard() });
+    const step = STEPS[state.step];
+    if (step) {
+      await step.prompt(this, chatId, token, state);
       return;
     }
-    switch (state.step) {
-      case "idle":
-        await sendMessage(token, chatId, "برای شروع صدور پیش‌فاکتور، «➕ فاکتور جدید» را بزنید.", {
-          reply_markup: MAIN_MENU,
-        });
-        return;
-      case "choose_company":
-        await this.promptChooseCompany(chatId, token);
-        return;
-      case "customer_action":
-        await this.promptCustomerAction(chatId, token);
-        return;
-      case "customer_detail_address":
-      case "customer_detail_postal":
-      case "customer_detail_national":
-      case "customer_detail_phone":
-        await this.promptCustomerDetail(chatId, token, state.step);
-        return;
-      case "item_description":
-        await this.promptItemDescription(chatId, token, state);
-        return;
-      case "item_more":
-        await this.promptItemMore(chatId, token);
-        return;
-      case "ask_stamp":
-        await this.promptStamp(chatId, token);
-        return;
-      default:
-        // handleCallback now routes every unclaimed button tap through here,
-        // so a step this switch does not know about must still answer with
-        // something the user can act on rather than falling out silently.
-        await sendMessage(token, chatId, "برای شروع صدور پیش‌فاکتور، «➕ فاکتور جدید» را بزنید.", {
-          reply_markup: MAIN_MENU,
-        });
-        return;
-    }
+    // A step the table does not know about is a bug, not a user error, so the
+    // reply still has to be something the user can act on.
+    await sendMessage(token, chatId, START_HINT, { reply_markup: MAIN_MENU });
   }
 
   // ---------------- Final PDF generation ----------------

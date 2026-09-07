@@ -19,3 +19,4 @@ playwright-report/
 public/assets/
 public/fonts/
 src/lib/persianNumbers.js
+src/lib/invoiceTotals.js

@@ -45,12 +45,9 @@
     portrait: { w: 210, h: 297 },
   };
   var PAGE_SAFE_MARGIN_MM = 10;
-  var LEGACY_STORAGE_KEY = "preinvoice.autosave.v1";
-  // Legacy monolithic storage is read only for migration/recovery. New saves
-  // use one key per invoice so concurrent tabs can never overwrite unrelated
-  // entries with a stale whole-list snapshot.
-  var SAVED_LIST_KEY = "preinvoice.saved.v1";
-  var SAVED_ENTRY_PREFIX = "preinvoice.saved.entry.v2.";
+
+  // Company Profile storage. The saved-invoice keys are not here: those belong
+  // to js/document-store.js, which is the only file that names them.
   var CUSTOM_PROFILES_KEY = "preinvoice.companyProfiles.v1";
   var PROFILE_ASSETS_KEY = "preinvoice.profileAssets.v1";
   var PROFILE_OVERRIDES_KEY = "preinvoice.profileOverrides.v1";
@@ -97,7 +94,6 @@
   // PREFIX) without ever clobbering a number the user actually typed.
   var numberIsAutoSuggested = false;
   var dateIsAutoSuggested = false;
-  var storageWarnings = [];
 
   var ROW_FIELD_LABELS = {
     description: "شرح کالا یا خدمت",
@@ -553,11 +549,7 @@
     }
     // Side records only. The company is already gone by this point, so a
     // failure here must not undo the deletion — it just leaves dead keys.
-    try {
-      localStorage.removeItem(SEQ_KEY_PREFIX + profileKey);
-    } catch (err) {
-      /* numbering leftovers are harmless */
-    }
+    forgetInvoiceCounter(profileKey);
     try {
       var assets = readStoredObject(PROFILE_ASSETS_KEY);
       if (Object.prototype.hasOwnProperty.call(assets, profileKey)) {
@@ -937,8 +929,6 @@
     if (stampResetBtnEl) stampResetBtnEl.disabled = !hasStampOverride;
   }
 
-  var SEQ_KEY_PREFIX = "pishFaktor.dailySeq.";
-
   // Number suggestions are deliberately side-effect free. Merely opening the
   // app, loading a file, or pressing New must never consume an accounting
   // number. The per-company counter advances only when the document is first
@@ -956,93 +946,24 @@
     return input ? input.value : "";
   }
 
+  /*
+   * The counter is keyed by a company that actually exists. An invoice can
+   * arrive carrying a profile this browser has never heard of — an imported
+   * file, or a custom company since deleted — and its number still has to be
+   * accounted for somewhere rather than opening a private sequence nobody
+   * will ever check against.
+   */
+  function counterKeyFor(profileKey) {
+    return COMPANY_PROFILES[profileKey] ? profileKey : DEFAULT_PROFILE_KEY;
+  }
+
+  // nextInvoiceNumber, commitInvoiceNumber, invoiceNumberIsIssued and
+  // forgetInvoiceCounter come from js/invoice-counter.js, which owns the
+  // `YYYYMMDD-NNN` format and the high-water rule behind them. This is the
+  // document's half: which day the number belongs to.
   function suggestInvoiceNumber(profileKey, invoiceDate) {
     var datePart = invoiceDateDigits(invoiceDate) || invoiceDateDigits(todayJalaliString());
-    if (!datePart) return "";
-
-    var key = SEQ_KEY_PREFIX + (COMPANY_PROFILES[profileKey] ? profileKey : DEFAULT_PROFILE_KEY);
-    var next = 1;
-    try {
-      var saved = JSON.parse(localStorage.getItem(key) || "null");
-      if (saved) {
-        if (saved.days && typeof saved.days === "object") {
-          if (saved.days[datePart] != null) next = (saved.days[datePart] || 0) + 1;
-          else if (saved.day === datePart) next = (saved.n || 0) + 1;
-        } else if (saved.day === datePart) {
-          next = (saved.n || 0) + 1;
-        }
-      }
-    } catch (err) {
-      next = 1;
-    }
-
-    var suffix = String(next);
-    while (suffix.length < 3) suffix = "0" + suffix;
-    return toPersianDigits(datePart + "-" + suffix);
-  }
-
-  function commitInvoiceNumber(profileKey, number) {
-    var ascii = toAsciiDigits(number || "");
-    var match = ascii.match(/^(\d{8})-(\d+)$/);
-    if (!match) return;
-    var day = match[1];
-    var n = parseInt(match[2], 10);
-    if (!n) return;
-    var key = SEQ_KEY_PREFIX + (COMPANY_PROFILES[profileKey] ? profileKey : DEFAULT_PROFILE_KEY);
-    try {
-      var saved = JSON.parse(localStorage.getItem(key) || "null");
-      var days = {};
-      if (saved && typeof saved === "object") {
-        if (saved.days && typeof saved.days === "object") {
-          days = Object.assign({}, saved.days);
-        } else if (saved.day && typeof saved.n === "number") {
-          days[saved.day] = saved.n;
-        }
-      }
-      var prevForDay = days[day] || 0;
-      if (prevForDay < n) {
-        days[day] = n;
-        var currentDay = (saved && saved.day) || day;
-        var currentN = (saved && saved.n) || n;
-        if (day === currentDay) {
-          currentN = Math.max(currentN, n);
-        } else if (!saved || !saved.day) {
-          currentDay = day;
-          currentN = n;
-        }
-        localStorage.setItem(key, JSON.stringify({ day: currentDay, n: currentN, days: days }));
-      }
-    } catch (err) {
-      // Storage can be disabled in private mode. Saving the invoice itself
-      // will surface that failure; numbering must not block the editor.
-    }
-  }
-
-  // Has this exact daily-format number already been retired by the company's
-  // counter — i.e. is some document carrying it already saved or printed?
-  // commitInvoiceNumber only ever raises a day's high-water mark, so the
-  // question is just whether n sits at or below it. Used by «ذخیره با نام
-  // جدید», which would otherwise put an issued number on a second document.
-  function invoiceNumberIsCommitted(profileKey, number) {
-    var ascii = toAsciiDigits(number || "");
-    var match = ascii.match(/^(\d{8})-(\d+)$/);
-    if (!match) return false;
-    var n = parseInt(match[2], 10);
-    if (!n) return false;
-    var key = SEQ_KEY_PREFIX + (COMPANY_PROFILES[profileKey] ? profileKey : DEFAULT_PROFILE_KEY);
-    try {
-      var saved = JSON.parse(localStorage.getItem(key) || "null");
-      if (!saved || typeof saved !== "object") return false;
-      var day = match[1];
-      var highWater = 0;
-      if (saved.days && typeof saved.days === "object" && saved.days[day] != null) highWater = saved.days[day] || 0;
-      else if (saved.day === day) highWater = saved.n || 0;
-      return n <= highWater;
-    } catch (err) {
-      // Unreadable storage proves nothing about the number, and guessing
-      // "already used" here would renumber a document for no reason.
-      return false;
-    }
+    return nextInvoiceNumber(counterKeyFor(profileKey), datePart);
   }
 
   function refreshLiveInvoiceNumber() {
@@ -1877,45 +1798,15 @@
     });
   }
 
-  // normalizeStrictNumber, parseDecimalToBigIntScaled and the parse*/format*
-  // helpers used below all come from js/persian-numbers.js, which index.html
-  // loads as a classic script before this one. See that file for what ""
-  // (genuinely empty) and null (malformed) mean — callers must keep them
-  // apart, since an empty tax rate legitimately means zero while a malformed
-  // one must never be quietly treated as one.
-
-  function strictMoney(value) {
-    var normalized = normalizeStrictNumber(value);
-    if (normalized === null) return { valid: false, value: 0n };
-    if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, value: 0n };
-    return {
-      valid: /^\d+$/.test(normalized),
-      value: parseDecimalToBigIntScaled(normalized, 0),
-    };
-  }
-
-  function strictQuantity(value) {
-    var normalized = normalizeStrictNumber(value);
-    if (normalized === null) return { valid: false, value: 0n };
-    if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, value: 0n };
-    var parsed = parseQtyMilli(normalized);
-    return {
-      valid: /^\d+(?:\.\d{1,3})?$/.test(normalized) && parsed > 0n,
-      value: parsed,
-    };
-  }
-
-  function strictPercent(value) {
-    var normalized = normalizeStrictNumber(value);
-    if (normalized === null) return { valid: false, value: 0n };
-    if (!normalized) return { valid: true, value: 0n };
-    if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, value: 0n };
-    var parsed = parsePercentBps(normalized);
-    return {
-      valid: /^\d+(?:\.\d{1,2})?$/.test(normalized) && parsed >= 0n && parsed <= 10000n,
-      value: parsed,
-    };
-  }
+  /*
+   * strictMoney, strictQuantity and strictPercent come from
+   * js/invoice-totals.js, and the parse/format helpers they build on from
+   * js/persian-numbers.js — index.html loads both as classic scripts before
+   * this one. See those files for what "" (genuinely empty) and null
+   * (malformed) mean; callers must keep them apart, since an empty tax rate
+   * legitimately means zero while a malformed one must never be quietly
+   * treated as one.
+   */
 
   // Warnings belong in the single banner above the sheet. The only per-control
   // state these two touch is the accessibility flag; a cell is never painted
@@ -1929,85 +1820,76 @@
     input.setAttribute("aria-invalid", "true");
   }
 
+  // Reads the Item Rows off the sheet, hands them to the Financial
+  // Computations module, and paints what comes back. No arithmetic of its own:
+  // js/invoice-totals.js owns every figure below, and the bot's PDF is drawn
+  // from that same module (see worker/scripts/sync-assets.mjs).
   function recalcAll(opts) {
     var rows = rowsBody.querySelectorAll("tr");
-    var filledRows = 0;
-    var gross = 0n;
     calculationErrors = [];
     financialBlockingErrors = [];
 
-    rows.forEach(function (tr, rowPosition) {
-      var rowNumber = rowPosition + 1;
-      syncRowAccessibility(tr, rowNumber);
-      var blank = rowIsBlank(tr);
-      tr.classList.toggle("is-blank-row", blank);
-
-      var descriptionInput = tr.querySelector('[data-row-field="description"]');
-      var qtyInput = tr.querySelector('[data-row-field="quantity"]');
-      var priceInput = tr.querySelector('[data-row-field="unitPrice"]');
-      [descriptionInput, qtyInput, priceInput].forEach(clearInlineError);
-
-      var totalEl = tr.querySelector('[data-row-computed="total"]');
-
-      if (blank) {
-        tr.querySelector(".row-index-badge").textContent = toPersianDigits(rowNumber);
-        totalEl.textContent = "";
-        return;
-      }
-
-      filledRows += 1;
-      tr.querySelector(".row-index-badge").textContent = toPersianDigits(rowNumber);
-
-      var rowErrors = [];
-      var rowFinancialErrors = [];
-      if (!descriptionInput.value.trim()) {
-        rowErrors.push("شرح کالا یا خدمت وارد نشده است");
-        setInlineError(descriptionInput);
-      }
-
-      var qty = strictQuantity(qtyInput.value);
-      if (!qty.valid) {
-        rowErrors.push("تعداد/مقدار معتبر نیست");
-        rowFinancialErrors.push("تعداد/مقدار معتبر نیست");
-        setInlineError(qtyInput);
-      }
-
-      var price = strictMoney(priceInput.value);
-      if (!price.valid) {
-        rowErrors.push("مبلغ واحد معتبر نیست");
-        rowFinancialErrors.push("مبلغ واحد معتبر نیست");
-        setInlineError(priceInput);
-      }
-
-      var total = 0n;
-      if (qty.valid && price.valid) total = bigRoundDiv(qty.value * price.value, 1000n);
-
-      rowErrors.forEach(function (message) {
-        calculationErrors.push("ردیف " + toPersianDigits(rowNumber) + ": " + message);
+    var cellsByRow = [];
+    var rawRows = [];
+    rows.forEach(function (tr) {
+      var cells = {
+        tr: tr,
+        badge: tr.querySelector(".row-index-badge"),
+        total: tr.querySelector('[data-row-computed="total"]'),
+      };
+      ROW_FIELDS.forEach(function (field) {
+        cells[field] = tr.querySelector('[data-row-field="' + field + '"]');
       });
-      rowFinancialErrors.forEach(function (message) {
-        financialBlockingErrors.push("ردیف " + toPersianDigits(rowNumber) + ": " + message);
+      cellsByRow.push(cells);
+      rawRows.push({
+        description: cells.description ? cells.description.value : "",
+        quantity: cells.quantity ? cells.quantity.value : "",
+        unit: cells.unit ? cells.unit.value : "",
+        unitPrice: cells.unitPrice ? cells.unitPrice.value : "",
       });
-
-      // A missing description is unrelated to the arithmetic. An invalid
-      // quantity or price is never allowed to alter an authoritative total —
-      // it excludes this row, while healthy rows continue to calculate.
-      if (qty.valid && price.valid) {
-        totalEl.textContent = formatBigRial(total);
-        gross += total;
-      } else {
-        totalEl.textContent = "";
-      }
-
-      fitNumericEl(totalEl);
-      fitNumericEl(qtyInput);
-      fitNumericEl(priceInput);
     });
 
     var taxPercentInput = document.querySelector('[data-field="taxPercent"]');
+    var summary = summarizeRows(rawRows, taxPercentInput ? taxPercentInput.value : "");
+
+    summary.rows.forEach(function (result, index) {
+      var cells = cellsByRow[index];
+      var rowNumber = index + 1;
+      syncRowAccessibility(cells.tr, rowNumber);
+      cells.tr.classList.toggle("is-blank-row", result.blank);
+      [cells.description, cells.quantity, cells.unitPrice].forEach(clearInlineError);
+      cells.badge.textContent = toPersianDigits(rowNumber);
+
+      if (result.blank) {
+        cells.total.textContent = "";
+        return;
+      }
+
+      // A missing description is unrelated to the arithmetic. An invalid
+      // quantity or price is never allowed to alter an authoritative total —
+      // the module excludes that row, while healthy rows continue to
+      // calculate, and it blocks Save/Print here.
+      if (result.descriptionMissing) {
+        calculationErrors.push(rowError(rowNumber, "شرح کالا یا خدمت وارد نشده است"));
+        setInlineError(cells.description);
+      }
+      if (!result.quantityValid) {
+        blockingRowError(rowNumber, "تعداد/مقدار معتبر نیست");
+        setInlineError(cells.quantity);
+      }
+      if (!result.unitPriceValid) {
+        blockingRowError(rowNumber, "مبلغ واحد معتبر نیست");
+        setInlineError(cells.unitPrice);
+      }
+
+      cells.total.textContent = result.lineTotal === null ? "" : formatBigRial(result.lineTotal);
+      fitNumericEl(cells.total);
+      fitNumericEl(cells.quantity);
+      fitNumericEl(cells.unitPrice);
+    });
+
     clearInlineError(taxPercentInput);
-    var tax = strictPercent(taxPercentInput.value);
-    if (!tax.valid) {
+    if (!summary.taxValid) {
       calculationErrors.push(TAX_PERCENT_ERROR);
       financialBlockingErrors.push(TAX_PERCENT_ERROR);
       setInlineError(taxPercentInput);
@@ -2024,16 +1906,13 @@
       setInlineError(invoiceDateInput);
     }
 
-    var usableTax = tax.valid ? tax.value : 0n;
-    var taxTotal = bigRoundDiv(gross * usableTax, 10000n);
-    var netTotal = gross + taxTotal;
     var money = function (value) {
-      return filledRows ? formatBigRial(value) + " ریال" : "";
+      return summary.filledCount ? formatBigRial(value) + " ریال" : "";
     };
-    setTotal("grossTotal", money(gross));
-    setTotal("taxTotal", money(taxTotal));
-    setTotal("netTotal", money(netTotal));
-    setTotal("netTotalWords", filledRows ? rialToWordsBig(netTotal) : "");
+    setTotal("grossTotal", money(summary.grossTotal));
+    setTotal("taxTotal", money(summary.taxTotal));
+    setTotal("netTotal", money(summary.netTotal));
+    setTotal("netTotalWords", summary.filledCount ? rialToWordsBig(summary.netTotal) : "");
 
     // Show calculation warnings as the user types. Output validation may add
     // document-level notes (date, number, parties) to this same banner.
@@ -2048,13 +1927,25 @@
     if (statusDotEl) statusDotEl.classList.toggle("has-error", calculationErrors.length > 0);
   }
 
+  function rowError(rowNumber, message) {
+    return "ردیف " + toPersianDigits(rowNumber) + ": " + message;
+  }
+
+  // Wrong arithmetic in a row is both a warning to show and a reason to refuse
+  // an authoritative action, so it always lands on both lists.
+  function blockingRowError(rowNumber, message) {
+    var text = rowError(rowNumber, message);
+    calculationErrors.push(text);
+    financialBlockingErrors.push(text);
+  }
+
   function requireField(selector, message, errors) {
     var input = document.querySelector(selector);
     if (input && !input.value.trim()) errors.push(message);
   }
 
   function renderOutputWarnings(warnings) {
-    var combined = storageWarnings.concat(warnings || []);
+    var combined = documentStoreWarnings().concat(warnings || []);
     var unique = combined.filter(function (text, index) { return combined.indexOf(text) === index; });
     validationListEl.innerHTML = "";
     unique.forEach(function (text) {
@@ -2393,146 +2284,12 @@
   // exists (asking for a name only the first time); "جدید" / opening a file
   // from disk detach from that entry so the next Save starts a new one.
 
-  function addStorageWarning(message) {
-    if (storageWarnings.indexOf(message) === -1) storageWarnings.push(message);
-  }
-
-  function normalizeSavedEntry(entry, fallbackId) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return null;
-    if (!entry.data || typeof entry.data !== "object" || Array.isArray(entry.data)) return null;
-    var id = String(entry.id || fallbackId || "").trim();
-    if (!id) return null;
-    var savedAt = Number(entry.savedAt);
-    return {
-      id: id,
-      name: String(entry.name || "پیش‌فاکتور بدون نام"),
-      savedAt: Number.isFinite(savedAt) && savedAt > 0 ? savedAt : 0,
-      data: entry.data,
-    };
-  }
-
-  function readLegacySavedList() {
-    var raw = localStorage.getItem(SAVED_LIST_KEY);
-    if (!raw) return {};
-    try {
-      var parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Invalid saved list");
-      return parsed;
-    } catch (err) {
-      addStorageWarning("فهرست قدیمی ذخیره‌ها خراب است؛ برای جلوگیری از حذف اطلاعات دست‌نخورده نگه داشته شد.");
-      return {};
-    }
-  }
-
-  // Storage keys that hold something under SAVED_ENTRY_PREFIX which does not
-  // parse as a saved document. Recomputed by every loadSavedList() call and
-  // listed by renderSavedList, so a damaged entry is a row the user can see
-  // and delete. It used to be reported through addStorageWarning instead —
-  // and that list is append-only and never cleared, while the entry itself
-  // was filtered out of the panel: a permanent banner about a document with
-  // no delete button anywhere. The raw value is still never overwritten, only
-  // shown; deleting is the user's explicit choice.
-  var corruptSavedEntries = [];
-
-  function loadSavedList() {
-    var list = {};
-    corruptSavedEntries = [];
-    try {
-      for (var index = 0; index < localStorage.length; index += 1) {
-        var key = localStorage.key(index);
-        if (!key || key.indexOf(SAVED_ENTRY_PREFIX) !== 0) continue;
-        var fallbackId = key.slice(SAVED_ENTRY_PREFIX.length);
-        try {
-          var entry = normalizeSavedEntry(JSON.parse(localStorage.getItem(key) || "null"), fallbackId);
-          if (!entry) throw new Error("Invalid saved entry");
-          list[entry.id] = entry;
-        } catch (err) {
-          corruptSavedEntries.push({ key: key, id: fallbackId });
-        }
-      }
-
-      // Until migration completes, keep valid legacy entries visible. New v2
-      // entries win on id collisions and are stored independently.
-      var legacy = readLegacySavedList();
-      Object.keys(legacy).forEach(function (id) {
-        if (list[id]) return;
-        var entry = normalizeSavedEntry(legacy[id], id);
-        if (entry) list[entry.id] = entry;
-        else addStorageWarning("حداقل یک سند در فهرست قدیمی خراب است و برای بازیابی حذف نشد.");
-      });
-    } catch (err) {
-      addStorageWarning("دسترسی به ذخیره‌های مرورگر ممکن نشد؛ از پشتیبان فایل استفاده کنید.");
-    }
-    return list;
-  }
-
-  function persistSavedEntry(entry) {
-    var normalized = normalizeSavedEntry(entry, entry && entry.id);
-    if (!normalized) throw new Error("Invalid saved entry");
-    localStorage.setItem(SAVED_ENTRY_PREFIX + normalized.id, JSON.stringify(normalized));
-  }
-
-  function removeSavedEntry(id) {
-    localStorage.removeItem(SAVED_ENTRY_PREFIX + id);
-    try {
-      var raw = localStorage.getItem(SAVED_LIST_KEY);
-      if (raw) {
-        var legacy = readLegacySavedList();
-        if (legacy && Object.prototype.hasOwnProperty.call(legacy, id)) {
-          delete legacy[id];
-          if (Object.keys(legacy).length === 0) {
-            localStorage.removeItem(SAVED_LIST_KEY);
-          } else {
-            localStorage.setItem(SAVED_LIST_KEY, JSON.stringify(legacy));
-          }
-        }
-      }
-    } catch (err) {
-      /* ignore storage cleanup errors */
-    }
-  }
-
-  function migrateSavedListStorage() {
-    try {
-      var raw = localStorage.getItem(SAVED_LIST_KEY);
-      if (!raw) return;
-      var legacy = readLegacySavedList();
-      if (!Object.keys(legacy).length) return;
-      Object.keys(legacy).forEach(function (id) {
-        var entry = normalizeSavedEntry(legacy[id], id);
-        if (!entry) throw new Error("Invalid legacy entry");
-        var targetKey = SAVED_ENTRY_PREFIX + entry.id;
-        if (!localStorage.getItem(targetKey)) persistSavedEntry(entry);
-      });
-      // Remove the monolithic source only after every independent entry write
-      // succeeds. Quota/security failures leave it recoverable and visible.
-      localStorage.removeItem(SAVED_LIST_KEY);
-    } catch (err) {
-      addStorageWarning("انتقال ذخیره‌های قدیمی کامل نشد؛ نسخهٔ اصلی برای بازیابی حفظ شد.");
-    }
-  }
-
-  // A one-time upgrade path so users who saved under the old single-slot
-  // autosave don't lose that invoice: it becomes the first named entry.
-  function migrateLegacyAutosave() {
-    try {
-      var legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
-      if (!legacyRaw) return;
-      var data = JSON.parse(legacyRaw);
-      if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("Invalid legacy autosave");
-      var id = "inv-legacy-autosave";
-      if (!localStorage.getItem(SAVED_ENTRY_PREFIX + id)) {
-        persistSavedEntry({ id: id, name: "بازیابی‌شده از نسخهٔ قبلی برنامه", savedAt: Date.now(), data: data });
-      }
-      // Only remove the source after the replacement write has completed.
-      // A quota/security failure must leave the legacy invoice recoverable.
-      localStorage.removeItem(LEGACY_STORAGE_KEY);
-    } catch (err) {
-      // Keep the source intact. A future session (or a user-created backup)
-      // may still be able to recover it once storage becomes available.
-      addStorageWarning("ذخیرهٔ خودکار نسخهٔ قدیمی خراب است یا منتقل نشد؛ نسخهٔ خام آن حذف نشد.");
-    }
-  }
+  /*
+   * listDocuments, readDocument, documentConflict, saveDocument,
+   * removeDocument, purgeCorruptDocument and documentStoreWarnings come from
+   * js/document-store.js, which owns the key layout, both storage migrations
+   * and the version rule behind them. Nothing below names a storage key.
+   */
 
   function suggestEntryName(data) {
     if (data.buyer && data.buyer.name) return data.buyer.name;
@@ -2550,7 +2307,9 @@
   }
 
   function renderSavedList() {
-    var list = loadSavedList();
+    var listing = listDocuments();
+    var list = listing.entries;
+    var corrupt = listing.corrupt;
     var entries = Object.keys(list)
       .map(function (id) {
         return list[id];
@@ -2559,9 +2318,9 @@
         return b.savedAt - a.savedAt;
       });
 
-    savedCountEl.textContent = toPersianDigits(String(entries.length + corruptSavedEntries.length));
+    savedCountEl.textContent = toPersianDigits(String(entries.length + corrupt.length));
     savedListEl.innerHTML = "";
-    savedEmptyEl.hidden = entries.length + corruptSavedEntries.length > 0;
+    savedEmptyEl.hidden = entries.length + corrupt.length > 0;
 
     entries.forEach(function (entry) {
       var li = document.createElement("li");
@@ -2621,7 +2380,7 @@
     // Damaged entries, listed last. They cannot be opened — nothing here
     // knows what they were — but they can now be got rid of, which is the
     // only action left that a user can take about one.
-    corruptSavedEntries.forEach(function (broken) {
+    corrupt.forEach(function (broken) {
       var li = document.createElement("li");
       li.className = "is-corrupt";
 
@@ -2662,9 +2421,7 @@
       true
     );
     if (!confirmed) return;
-    try {
-      localStorage.removeItem(key);
-    } catch (err) {
+    if (!purgeCorruptDocument(key)) {
       setStatus("حذف سند خراب ناموفق بود؛ ذخیرهٔ مرورگر در دسترس نیست.");
       return;
     }
@@ -2692,20 +2449,21 @@
   async function saveCurrentInner(forceNew) {
     refreshAutomaticTemporalFields(true);
     if (blockAuthoritativeAction("ذخیره")) return false;
-    var list = loadSavedList();
     var data = collectInvoiceData();
     var name;
-    var isNewEntry = !!forceNew || !currentSavedId || !list[currentSavedId];
+    // The store answers both halves of "is this an overwrite, and is it safe":
+    // whether the entry is still there, and whether it has moved since this tab
+    // last saw it. Asking the user is the only part left here, because it is
+    // the only part that needs a dialog.
+    var standing = currentSavedId ? documentConflict(currentSavedId, currentSavedVersion) : { exists: false };
+    var isNewEntry = !!forceNew || !currentSavedId || !standing.exists;
 
     if (!isNewEntry) {
-      name = list[currentSavedId].name;
-      // Optimistic conflict check: `list` was just loaded fresh above, so
-      // list[currentSavedId].savedAt is whatever is in storage RIGHT NOW.
-      // currentSavedVersion is whatever this tab last saw (on open, or on
-      // this tab's own last successful save). A mismatch means some other
-      // tab saved a newer version of this exact entry in between — silently
-      // persisting over it would discard that tab's changes with no trace.
-      if (currentSavedVersion != null && list[currentSavedId].savedAt !== currentSavedVersion) {
+      name = standing.current.name;
+      // Another tab saved a newer version of this exact entry in between.
+      // Silently persisting over it would discard that tab's changes with no
+      // trace, so the overwrite becomes the user's call.
+      if (standing.conflict) {
         var keepOverwriting = await confirmApp(
           "تغییر همزمان سند",
           "این سند در برگهٔ دیگری تغییر کرده است. آیا می‌خواهید تغییرات فعلی جایگزین نسخهٔ جدید شوند؟",
@@ -2713,7 +2471,7 @@
           true
         );
         // Cancel: touch neither the stored (other tab's) version nor this
-        // tab's own unsaved edits — just stop before persistSavedEntry runs.
+        // tab's own unsaved edits — just stop before the write runs.
         if (!keepOverwriting) {
           setStatus("ذخیره انجام نشد؛ سند در برگهٔ دیگری تغییر کرده است.");
           return false;
@@ -2753,7 +2511,7 @@
       if (forceNew) {
         var numberInput = document.querySelector('[data-field="meta.number"]');
         var activeProfile = COMPANY_PROFILES[profileSelectEl.value] ? profileSelectEl.value : DEFAULT_PROFILE_KEY;
-        if (numberInput && invoiceNumberIsCommitted(activeProfile, numberInput.value)) {
+        if (numberInput && invoiceNumberIsIssued(counterKeyFor(activeProfile), numberInput.value)) {
           var freshNumber = suggestInvoiceNumber(activeProfile, currentInvoiceDateValue());
           if (freshNumber && freshNumber !== numberInput.value) {
             numberInput.value = freshNumber;
@@ -2764,24 +2522,23 @@
       }
 
       data = collectInvoiceData();
-      var savedAt = Date.now();
-      persistSavedEntry({
+      var written = saveDocument({
         id: currentSavedId,
         name: name,
-        savedAt: savedAt,
         data: dataForBrowserStorage(data),
       });
+      if (!written.ok) throw new Error("Document store refused the write");
       // Commit every valid daily-format number, not only untouched automatic
       // suggestions. Manually corrected and file-imported numbers must also
       // advance the counter or the next document can reuse them.
-      commitInvoiceNumber(data.company.profile, data.meta.number);
+      commitInvoiceNumber(counterKeyFor(data.company.profile), data.meta.number);
       numberIsAutoSuggested = false;
       dateIsAutoSuggested = false;
       currentSavedName = name;
       // This tab's own save is now the version of record; a normal next
       // save in the same tab must compare against this, not the one that
       // was current when the entry was opened.
-      currentSavedVersion = savedAt;
+      currentSavedVersion = written.savedAt;
       isDirty = false;
       defaultRowCountManaged = false;
       renderSavedList();
@@ -2796,13 +2553,12 @@
   }
 
   async function openSavedEntry(id) {
-    var list = loadSavedList();
-    var entry = list[id];
+    var entry = readDocument(id);
     if (!entry) return;
     if (isDirty) {
       var confirmed = await confirmApp("باز کردن سند", "تغییرات ذخیره‌نشده از بین می‌رود. «" + entry.name + "» باز شود؟", "باز کردن");
       if (!confirmed) return;
-      entry = loadSavedList()[id];
+      entry = readDocument(id);
       if (!entry) {
         renderSavedList();
         setStatus("این سند در برگهٔ دیگری حذف شده است.");
@@ -2841,18 +2597,14 @@
   }
 
   async function deleteSavedEntry(id) {
-    var list = loadSavedList();
-    var entry = list[id];
+    var entry = readDocument(id);
     if (!entry) return;
     var confirmed = await confirmApp("حذف سند", "«" + entry.name + "» حذف شود؟ این کار قابل بازگشت نیست.", "حذف", true);
     if (!confirmed) return;
 
-    try {
-      // Delete only this entry's independent key. No whole-list snapshot is
-      // written, so saves made by another tab while confirmation was open are
-      // preserved.
-      removeSavedEntry(id);
-    } catch (err) {
+    // Only this entry's independent key is touched, so saves made by another
+    // tab while the confirmation was open are preserved.
+    if (!removeDocument(id)) {
       setStatus("حذف سند از ذخیرهٔ مرورگر ناموفق بود.");
       return;
     }
@@ -3678,7 +3430,7 @@
   // out on paper.
   function finalizePrintedDocument() {
     var data = collectInvoiceData();
-    commitInvoiceNumber(data.company.profile, data.meta.number);
+    commitInvoiceNumber(counterKeyFor(data.company.profile), data.meta.number);
     numberIsAutoSuggested = false;
     dateIsAutoSuggested = false;
 
@@ -4316,8 +4068,6 @@
       return "";
     });
 
-    migrateSavedListStorage();
-    migrateLegacyAutosave();
     hydrateCompanyProfiles();
     // Every load starts a clean blank invoice — nothing is auto-restored.
     // Previously-saved invoices stay reachable from the "ذخیره‌شده‌ها" panel
