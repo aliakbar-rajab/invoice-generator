@@ -22,6 +22,7 @@ import {
 } from "../lib/persianNumbers.js";
 import { buildInvoiceHtml } from "../lib/invoiceTemplate.js";
 import { renderInvoicePdf } from "../lib/pdf.js";
+import { PAGE_OVERFLOW_CODE } from "../lib/invoiceLayout.js";
 import { loadDataUri } from "../lib/assets.js";
 
 const MAIN_MENU = replyKeyboard([["➕ فاکتور جدید"]]);
@@ -29,6 +30,10 @@ const MAX_HISTORY = 100;
 const MAX_ITEMS = 30;
 
 const WAIT_MESSAGE_TEXT = "⏳ در حال آماده‌سازی و ارسال پیش‌فاکتور، لطفاً منتظر بمانید…";
+const STOPPED_MESSAGE_TEXT = "⏹ صدور این پیش‌فاکتور متوقف شد.";
+const RENDER_FAILED_MESSAGE_TEXT = "⚠️ در تولید فایل PDF مشکلی پیش آمد. لطفاً دوباره تلاش کنید.";
+const OVERFLOW_MESSAGE_TEXT =
+  "⚠️ شرح یک یا چند ردیف بلندتر از آن است که در صفحهٔ A4 جا شود و پیش‌فاکتور صادر نشد. با «🔙 بازگشت» ردیف‌ها را کوتاه‌تر وارد کنید.";
 
 // The seller's local zone. Every date the bot stamps on a sheet — and the
 // year its invoice counter is keyed by — is a date in this zone, never the
@@ -734,14 +739,37 @@ export class InvoiceSession extends DurableObject {
   // ---------------- Final PDF generation ----------------
 
   async generateAndSendInvoice(chatId, token, state) {
+    // `state` is the very object routeCallback just saved. The render takes
+    // seconds, and updates keep arriving while it awaits: «❌ لغو», /new or
+    // «🔙 بازگشت» each save a DIFFERENT object over it. Once that happens this
+    // attempt is stale — it must neither send an invoice the user walked away
+    // from nor reset (or rewind) a conversation they have since moved on in.
+    const superseded = () => this.state !== state;
+
     // Sent before any of the slow work below so the user isn't left staring
     // at a silent chat for several seconds wondering if the bot died.
     const waitMessage = await sendMessage(token, chatId, WAIT_MESSAGE_TEXT).catch(() => null);
     const waitMessageId = waitMessage?.message_id ?? null;
 
-    // The accounting number this attempt drew, so a failed render can hand it
-    // back instead of retiring it (see the catch below).
+    // The accounting number this attempt drew, so a render that never reached
+    // the customer can hand it back instead of retiring it.
     let reserved = null;
+    const releaseReserved = async () => {
+      if (!reserved) return;
+      // release() is a no-op unless this attempt still holds the highest
+      // number, so a number some other chat has already built on is never
+      // clawed back.
+      await this.env.INVOICE_COUNTER.getByName("global")
+        .release(reserved.companyKey, reserved.yearKey, reserved.value)
+        .catch(() => {});
+      reserved = null;
+    };
+    const stepAside = async () => {
+      await releaseReserved();
+      if (waitMessageId) {
+        await editMessageText(token, chatId, waitMessageId, STOPPED_MESSAGE_TEXT).catch(() => {});
+      }
+    };
 
     await sendChatAction(token, chatId, "upload_document").catch(() => {});
     try {
@@ -771,6 +799,12 @@ export class InvoiceSession extends DurableObject {
       const docDate = jalaliParts.map((p) => p.value).join("");
 
       const asciiYear = toAsciiDigits(jalaliYear);
+      // Checked before a number is drawn, so a cancelled attempt usually never
+      // touches the counter at all.
+      if (superseded()) {
+        await stepAside();
+        return;
+      }
       const counterCompanyKey = state.companyKey === OTHER_COMPANY_KEY ? `other:${chatId}` : state.companyKey;
       const counterStub = this.env.INVOICE_COUNTER.getByName("global");
       const seq = await counterStub.next(counterCompanyKey, asciiYear);
@@ -801,43 +835,67 @@ export class InvoiceSession extends DurableObject {
       });
 
       const pdfBytes = await renderInvoicePdf(this.env, html);
+      // Last chance to step aside: past sendDocument the invoice is out.
+      if (superseded()) {
+        await stepAside();
+        return;
+      }
       const companySlug = state.companyKey === OTHER_COMPANY_KEY ? "other" : state.companyKey;
       const filename = `invoice-${companySlug}-${asciiYear}-${String(seq).padStart(3, "0")}.pdf`;
 
       await sendDocument(token, chatId, pdfBytes, filename, "🎉 پیش‌فاکتور شما آماده است.");
-      await this.saveState(freshState(state?.taxPercent));
-      if (waitMessageId) {
-        await deleteMessage(token, chatId, waitMessageId).catch(() => {});
-      }
-      await sendMessage(token, chatId, "برای صدور فاکتور جدید، «➕ فاکتور جدید» را بزنید.", {
-        reply_markup: MAIN_MENU,
-      });
     } catch (err) {
       console.error("generateAndSendInvoice failed:", err);
       // The number was drawn before the render, because it has to be printed
       // ON the sheet. A render that never produced a sheet must not retire
       // it: the user is sent straight back to "🖋 مهر" to retry, and every
       // retry used to burn another number, leaving permanent gaps in a
-      // sequence that is meant to be gapless. release() is a no-op unless
-      // this attempt still holds the highest number, so a number that some
-      // other chat has already built on is never clawed back.
-      if (reserved) {
-        await this.env.INVOICE_COUNTER.getByName("global")
-          .release(reserved.companyKey, reserved.yearKey, reserved.value)
-          .catch(() => {});
+      // sequence that is meant to be gapless.
+      await releaseReserved();
+      if (superseded()) {
+        // The user has already moved on; putting them back on «🖋 مهر» would
+        // yank them out of whatever they are doing now.
+        if (waitMessageId) await editMessageText(token, chatId, waitMessageId, STOPPED_MESSAGE_TEXT).catch(() => {});
+        return;
       }
       const retryState = this.advance(state, (s) => {
         s.step = "ask_stamp";
         return s;
       });
       await this.saveState(retryState);
-      const errorText = "⚠️ در تولید فایل PDF مشکلی پیش آمد. لطفاً دوباره تلاش کنید.";
+      // A page that cannot fit is a fact about the content, so "try again"
+      // would fail identically forever; say what actually has to change.
+      const errorText = err?.code === PAGE_OVERFLOW_CODE ? OVERFLOW_MESSAGE_TEXT : RENDER_FAILED_MESSAGE_TEXT;
       if (waitMessageId) {
         await editMessageText(token, chatId, waitMessageId, errorText).catch(() => {});
       } else {
         await sendMessage(token, chatId, errorText);
       }
       await this.promptStamp(chatId, token);
+      return;
+    }
+
+    // Delivered. The number is now printed on a sheet the customer holds, so
+    // nothing from here on may hand it back — these steps used to share the
+    // try above, and a failure in any of them (a rate-limited sendMessage, a
+    // storage hiccup) released the number AND told the user the PDF had
+    // failed, so the next invoice went out under the same number. Each step
+    // is now best-effort on its own.
+    if (!superseded()) {
+      await this.saveState(freshState(state?.taxPercent)).catch((err) => {
+        console.error("Resetting the session after a delivered invoice failed:", err);
+      });
+    }
+    if (waitMessageId) {
+      await deleteMessage(token, chatId, waitMessageId).catch(() => {});
+    }
+    // Only offer a fresh start to a user who has not already made one.
+    if (!superseded()) {
+      await sendMessage(token, chatId, "برای صدور فاکتور جدید، «➕ فاکتور جدید» را بزنید.", {
+        reply_markup: MAIN_MENU,
+      }).catch((err) => {
+        console.error("Sending the post-invoice menu failed:", err);
+      });
     }
   }
 }

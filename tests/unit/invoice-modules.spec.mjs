@@ -99,6 +99,15 @@ test("quantities are capped at three decimals and must be positive", () => {
   assert.equal(app.strictQuantity("-1").valid, false);
 });
 
+test("an over-precise quantity or rate carries 0n like every other invalid value, never null", () => {
+  assert.equal(app.strictQuantity("2.5555").valid, false);
+  assert.equal(app.strictQuantity("2.5555").value, 0n);
+  assert.equal(app.strictPercent("10.555").valid, false);
+  assert.equal(app.strictPercent("10.555").value, 0n);
+  // summarizeRows passes the rate's value straight through.
+  assert.equal(app.summarizeRows([], "10.555").taxBasisPoints, 0n);
+});
+
 // ---------------------------------------------------------------------------
 // Invoice number counter (js/invoice-counter.js)
 // ---------------------------------------------------------------------------

@@ -43,7 +43,10 @@ function strictQuantity(value) {
   var normalized = normalizeStrictNumber(value);
   if (normalized === null) return { valid: false, value: 0n };
   if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, value: 0n };
+  // parseQtyMilli answers null for more than three decimals; the contract
+  // above is an invalid row carrying 0n, not null.
   var parsed = parseQtyMilli(normalized);
+  if (parsed === null) return { valid: false, value: 0n };
   return {
     valid: /^\d+(?:\.\d{1,3})?$/.test(normalized) && parsed > 0n,
     value: parsed,
@@ -57,7 +60,9 @@ function strictPercent(value) {
   if (normalized === null) return { valid: false, value: 0n };
   if (!normalized) return { valid: true, value: 0n };
   if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return { valid: false, value: 0n };
+  // Likewise null for more than two decimals.
   var parsed = parsePercentBps(normalized);
+  if (parsed === null) return { valid: false, value: 0n };
   return {
     valid: /^\d+(?:\.\d{1,2})?$/.test(normalized) && parsed >= 0n && parsed <= 10000n,
     value: parsed,

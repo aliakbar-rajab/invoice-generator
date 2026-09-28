@@ -7,6 +7,7 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { renderInvoicePdf } from "../src/lib/pdf.js";
+import { PAGE_OVERFLOW_CODE } from "../src/lib/invoiceLayout.js";
 
 vi.mock("../src/lib/pdf.js", () => ({
 	renderInvoicePdf: vi.fn(async () => {
@@ -43,6 +44,10 @@ async function readState(chatId) {
 	return runInDurableObject(stubFor(chatId), (instance, state) => state.storage.get("state"));
 }
 
+// When set, Telegram answers any call this predicate picks with a 429, the way
+// a rate-limited bot sees it. Reset after every test.
+let failTelegramCall = null;
+
 function installFetchMock() {
 	const calls = [];
 	let nextMessageId = 1;
@@ -60,6 +65,9 @@ function installFetchMock() {
 		}
 		const entry = { method, body };
 		calls.push(entry);
+		if (failTelegramCall && failTelegramCall(entry)) {
+			return new Response(JSON.stringify({ ok: false, description: "Too Many Requests" }), { status: 429 });
+		}
 		if (method === "sendMessage") {
 			const messageId = nextMessageId++;
 			entry.resultMessageId = messageId;
@@ -94,6 +102,7 @@ describe("bot-only regressions", () => {
 
 	afterEach(() => {
 		vi.unstubAllGlobals();
+		failTelegramCall = null;
 	});
 
 	function nextUpdateId() {
@@ -263,6 +272,99 @@ describe("bot-only regressions", () => {
 		expect(baseline).toBe(1);
 		const state = await readState(chatId);
 		expect(state.step, "a sent invoice resets the session").toBe("idle");
+	});
+
+	// A custom company's counter is keyed by its own chat, so these tests can
+	// read the sequence without sharing it with anything else in the file.
+	async function reachStampWithCustomCompany(chatId) {
+		await send(chatId, textUpdate(chatId, "/start", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "➕ فاکتور جدید", nextUpdateId()));
+		await send(chatId, callbackUpdate(chatId, "company:other", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "شرکت آزمون", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "مشتری تست", nextUpdateId()));
+		await send(chatId, callbackUpdate(chatId, "custentry:items", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "کالای تست", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "2", nextUpdateId()));
+		await send(chatId, textUpdate(chatId, "1500000", nextUpdateId()));
+		await send(chatId, callbackUpdate(chatId, "additem:no", nextUpdateId()));
+	}
+
+	// The number the chat's next invoice would get, without consuming it.
+	async function peekNextNumber(chatId) {
+		const counter = env.INVOICE_COUNTER.getByName("global");
+		const year = new Intl.DateTimeFormat("fa-IR-u-ca-persian", { timeZone: "Asia/Tehran", year: "numeric" })
+			.format(new Date())
+			.replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0));
+		const n = await counter.next(`other:${chatId}`, year);
+		await counter.release(`other:${chatId}`, year, n);
+		return n;
+	}
+
+	const mentions = (calls, text) =>
+		calls.some((c) => (c.method === "sendMessage" || c.method === "editMessageText") && c.body.text?.includes(text));
+
+	it("keeps a delivered invoice's number even when a step after delivery fails", async () => {
+		const chatId = freshChatId();
+		await reachStampWithCustomCompany(chatId);
+		renderInvoicePdf.mockImplementationOnce(async () => new Uint8Array([1, 2, 3]));
+		// The PDF goes out, then the follow-up menu message is rate-limited.
+		failTelegramCall = (entry) => entry.method === "sendMessage" && entry.body.text?.includes("برای صدور فاکتور جدید");
+		await send(chatId, callbackUpdate(chatId, "stamp:no", nextUpdateId()));
+
+		expect(calls.some((c) => c.method === "sendDocument"), "the PDF must have been sent").toBe(true);
+		// Number 1 is printed on the customer's sheet; handing it back would
+		// put it on the next invoice too.
+		expect(await peekNextNumber(chatId)).toBe(2);
+		expect(mentions(calls, "مشکلی پیش آمد"), "a delivered invoice must not be reported as failed").toBe(false);
+		expect((await readState(chatId)).step).toBe("idle");
+	});
+
+	it("stops without sending, and gives the number back, when the user cancels mid-render", async () => {
+		const chatId = freshChatId();
+		await reachStampWithCustomCompany(chatId);
+		await runInDurableObject(stubFor(chatId), async (instance) => {
+			renderInvoicePdf.mockImplementationOnce(async () => {
+				await instance.handleUpdate(callbackUpdate(chatId, "cancel", nextUpdateId()));
+				return new Uint8Array([1, 2, 3]);
+			});
+			await instance.handleUpdate(callbackUpdate(chatId, "stamp:no", nextUpdateId()));
+		});
+
+		expect(calls.some((c) => c.method === "sendDocument"), "a cancelled invoice must not be sent").toBe(false);
+		expect(await peekNextNumber(chatId)).toBe(1);
+		expect(mentions(calls, "متوقف شد")).toBe(true);
+		expect((await readState(chatId)).step).toBe("idle");
+	});
+
+	it("does not drag a user who started over back to «مهر» when the stale render fails", async () => {
+		const chatId = freshChatId();
+		await reachStampWithCustomCompany(chatId);
+		await runInDurableObject(stubFor(chatId), async (instance) => {
+			renderInvoicePdf.mockImplementationOnce(async () => {
+				await instance.handleUpdate(textUpdate(chatId, "➕ فاکتور جدید", nextUpdateId()));
+				throw new Error("mocked render failure");
+			});
+			await instance.handleUpdate(callbackUpdate(chatId, "stamp:no", nextUpdateId()));
+		});
+
+		expect((await readState(chatId)).step).toBe("choose_company");
+		expect(mentions(calls, "مشکلی پیش آمد")).toBe(false);
+	});
+
+	it("says what to change when the invoice cannot fit on A4, instead of a bare retry", async () => {
+		const chatId = freshChatId();
+		await reachStampWithCustomCompany(chatId);
+		renderInvoicePdf.mockImplementationOnce(async () => {
+			const err = new Error("page 1 does not fit");
+			err.code = PAGE_OVERFLOW_CODE;
+			throw err;
+		});
+		await send(chatId, callbackUpdate(chatId, "stamp:no", nextUpdateId()));
+
+		expect(mentions(calls, "صفحهٔ A4 جا شود")).toBe(true);
+		expect(mentions(calls, "مشکلی پیش آمد")).toBe(false);
+		expect(await peekNextNumber(chatId)).toBe(1);
+		expect((await readState(chatId)).step).toBe("ask_stamp");
 	});
 
 	it("escapes a custom company name containing angle brackets and still asks for the customer", async () => {

@@ -1,5 +1,5 @@
 import puppeteer from "@cloudflare/puppeteer";
-import { layoutInvoicePages } from "./invoiceLayout.js";
+import { layoutInvoicePages, PAGE_OVERFLOW_CODE } from "./invoiceLayout.js";
 import { MAX_ROWS_PER_PAGE } from "./invoiceTemplate.js";
 
 /**
@@ -21,7 +21,15 @@ export async function renderInvoicePdf(env, html) {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
     await page.evaluate(() => document.fonts && document.fonts.ready);
-    await page.evaluate(layoutInvoicePages, { maxRowsPerPage: MAX_ROWS_PER_PAGE });
+    const layout = await page.evaluate(layoutInvoicePages, { maxRowsPerPage: MAX_ROWS_PER_PAGE });
+    // A page that still overflows would print with its bottom clipped off —
+    // rows or totals silently missing from a sheet that looks complete. Refuse
+    // it, exactly as the desktop app refuses to print one.
+    if (layout && layout.overflowPages && layout.overflowPages.length) {
+      const err = new Error(`Invoice page(s) ${layout.overflowPages.join(", ")} do not fit on A4`);
+      err.code = PAGE_OVERFLOW_CODE;
+      throw err;
+    }
     const pdf = await page.pdf({
       printBackground: true,
       width: "297mm",

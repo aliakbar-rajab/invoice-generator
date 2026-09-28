@@ -2075,7 +2075,10 @@
             } else {
               el.value = toPersianDigits(el.value);
             }
-            dateIsAutoSuggested = false;
+            // No `dateIsAutoSuggested = false` here: blur also fires when the
+            // field is merely clicked into and left, and that used to stop an
+            // untouched date from following the day past midnight. Actually
+            // typing already clears it, in the input handler below.
             if (numberIsAutoSuggested) refreshLiveInvoiceNumber();
             refreshValidityFromDate();
           } else if (isTextContentField(el)) {
@@ -2172,7 +2175,18 @@
   function applyInvoiceData(raw, options) {
     defaultRowCountManaged = !!(options && options.manageDefaultRows);
     var profileKey = (raw && raw.company && raw.company.profile) || DEFAULT_PROFILE_KEY;
-    if (!COMPANY_PROFILES[profileKey]) profileKey = registerEmbeddedProfile(profileKey, raw && raw.company);
+    if (!COMPANY_PROFILES[profileKey]) {
+      // Only an imported file may add a company to this browser — that is how
+      // a colleague's company arrives. A company missing while an invoice from
+      // this browser's OWN list is opened was deleted here, and registering it
+      // again silently undid that deletion (minus its logo and stamp, which
+      // dataForBrowserStorage never keeps for a stored profile). Such an
+      // invoice opens under the document-scoped «سایر» instead, still carrying
+      // its own company name and seller details.
+      profileKey = options && options.registerUnknownProfile
+        ? registerEmbeddedProfile(profileKey, raw && raw.company)
+        : CUSTOM_PROFILE_KEY;
+    }
     if (!COMPANY_PROFILES[profileKey]) profileKey = DEFAULT_PROFILE_KEY;
     var profile = resolveProfile(profileKey);
     var defaults = blankInvoice();
@@ -2275,6 +2289,86 @@
     recalcAll();
   }
 
+  // A fresh blank document, detached from every saved entry — what New does,
+  // and what boot starts with.
+  function startBlankDocument() {
+    applyInvoiceData(blankInvoice(), { manageDefaultRows: true });
+    currentSavedId = null;
+    currentSavedName = "";
+    currentSavedVersion = null;
+    isDirty = false;
+    numberIsAutoSuggested = true;
+    dateIsAutoSuggested = true;
+    stampRequested = true;
+    syncStampVisibility();
+  }
+
+  /*
+   * Everything an apply can disturb: the document itself plus the bookkeeping
+   * that says which saved entry it is and what is still a live suggestion.
+   * applyInvoiceData writes the sheet field by field, so one that throws
+   * partway leaves a mix of two documents on screen — while the editor is
+   * still bound to the entry that was open before, where the next Ctrl+S
+   * would silently store that mix.
+   */
+  function captureEditorState() {
+    return {
+      data: collectInvoiceData(),
+      savedId: currentSavedId,
+      savedName: currentSavedName,
+      savedVersion: currentSavedVersion,
+      dirty: isDirty,
+      numberAuto: numberIsAutoSuggested,
+      dateAuto: dateIsAutoSuggested,
+      rowsManaged: defaultRowCountManaged,
+      adHoc: Object.assign({}, adHocCompanyAssets),
+      overrides: Object.assign({}, invoiceAssetOverrides),
+    };
+  }
+
+  function restoreEditorState(snapshot) {
+    applyInvoiceData(snapshot.data, { manageDefaultRows: snapshot.rowsManaged });
+    // collectInvoiceData flattens branding to the effective images, which
+    // applyInvoiceData reads back as equivalent but not identical state (an
+    // ad-hoc logo and a temporary one look the same on paper). Put the exact
+    // records back; what is displayed is already the same.
+    adHocCompanyAssets = snapshot.adHoc;
+    invoiceAssetOverrides = snapshot.overrides;
+    syncTemporaryAssetControls();
+    refreshStampUploadPreview();
+    currentSavedId = snapshot.savedId;
+    currentSavedName = snapshot.savedName;
+    currentSavedVersion = snapshot.savedVersion;
+    isDirty = snapshot.dirty;
+    numberIsAutoSuggested = snapshot.numberAuto;
+    dateIsAutoSuggested = snapshot.dateAuto;
+  }
+
+  /*
+   * After an apply threw: put the previous document back, or failing that
+   * start a blank one, or failing even that at least detach from the saved
+   * entry so a half-applied sheet can never be saved over it. Returns the
+   * sentence that tells the user which of the three happened.
+   */
+  function recoverFromFailedApply(snapshot) {
+    try {
+      restoreEditorState(snapshot);
+      return "سند قبلی بدون تغییر باقی ماند.";
+    } catch (restoreErr) {
+      try {
+        startBlankDocument();
+        return "برای جلوگیری از ماندن سند نیمه‌باز، یک سند خالی بارگذاری شد.";
+      } catch (blankErr) {
+        currentSavedId = null;
+        currentSavedName = "";
+        currentSavedVersion = null;
+        numberIsAutoSuggested = false;
+        dateIsAutoSuggested = false;
+        return "سند روی صفحه ممکن است ناقص باشد؛ از سند ذخیره‌شدهٔ قبلی جدا شد تا روی آن ذخیره نشود.";
+      }
+    }
+  }
+
   // ---------- Saved invoices (named entries in localStorage) ----------
   //
   // Replaces the old single anonymous autosave slot with a visible, named
@@ -2295,6 +2389,19 @@
     if (data.buyer && data.buyer.name) return data.buyer.name;
     if (data.meta && data.meta.date) return "پیش‌فاکتور " + data.meta.date;
     return "پیش‌فاکتور " + nowLabel();
+  }
+
+  // A saved entry is only proven to have a `data` object (normalizeSavedEntry),
+  // not that the fields inside it are text: a hand-edited or damaged record can
+  // hold an object where a number belongs. Concatenating one of those threw,
+  // and renderSavedList runs during boot — so one bad record took down the
+  // saved list AND stopped boot before unsaved-change tracking was wired.
+  // The listing only ever shows these values, so anything that is not plain
+  // text simply reads as absent.
+  function storedText(value) {
+    if (typeof value === "string") return value;
+    if (typeof value === "number" && isFinite(value)) return String(value);
+    return "";
   }
 
   function formatSavedTime(ts) {
@@ -2333,9 +2440,11 @@
       nameEl.textContent = entry.name;
       var timeEl = document.createElement("span");
       timeEl.className = "saved-item-time";
-      var entryNumber = entry.data && entry.data.meta && entry.data.meta.number ? entry.data.meta.number : "بدون شماره";
-      var entryCompanyKey = entry.data && entry.data.company && entry.data.company.profile;
-      var entryCompanyName = (entry.data && entry.data.company && entry.data.company.name) || "";
+      var meta = isPlainObject(entry.data.meta) ? entry.data.meta : {};
+      var company = isPlainObject(entry.data.company) ? entry.data.company : {};
+      var entryNumber = storedText(meta.number) || "بدون شماره";
+      var entryCompanyKey = storedText(company.profile);
+      var entryCompanyName = storedText(company.name);
       var entryProfile = COMPANY_PROFILES[entryCompanyKey];
       // resolveProfile() falls back to DEFAULT_PROFILE_KEY, so an entry saved
       // under a company this browser no longer has — a deleted profile, or one
@@ -2571,18 +2680,15 @@
     // every field inside it is sane. Without the catch a throw here surfaces
     // as an unhandled rejection — a half-applied sheet, no message, and the
     // editor silently detached from whatever it was showing before.
+    var before = captureEditorState();
     try {
       applyInvoiceData(entry.data);
     } catch (err) {
+      var outcome = recoverFromFailedApply(before);
       await reportUnopenableFile(
         "سند باز نشد",
-        "«" + entry.name + "» ساختار سالمی ندارد و کامل باز نشد. برای جلوگیری از ماندن سند نیمه‌باز، یک سند خالی بارگذاری شد."
+        "«" + entry.name + "» ساختار سالمی ندارد و باز نشد. " + outcome
       );
-      applyInvoiceData(blankInvoice(), { manageDefaultRows: true });
-      currentSavedId = null;
-      currentSavedName = "";
-      currentSavedVersion = null;
-      isDirty = false;
       setStatus("«" + entry.name + "» باز نشد؛ ساختار آن سالم نیست.");
       return;
     }
@@ -2749,14 +2855,17 @@
     }
 
     // The shape check above proves the file is one of ours, not that every
-    // field inside it is sane. This boundary is the same one the old
-    // FileReader.onload had around applyInvoiceData: without it a throw here
-    // would surface only as an unhandled rejection, leaving a half-applied
-    // sheet and no message at all.
+    // field inside it is sane. A throw partway through used to be reported
+    // and then left as-is: a sheet mixing both documents, still bound to the
+    // previously opened saved entry, which the next Ctrl+S overwrote with the
+    // mix — no naming prompt, no conflict warning. It is now undone.
+    var before = captureEditorState();
     try {
-      applyInvoiceData(data);
+      applyInvoiceData(data, { registerUnknownProfile: true });
     } catch (err) {
-      await reportUnopenableFile("فایل نامعتبر", "فایل «" + file.name + "» ساختار سالمی ندارد و کامل باز نشد.");
+      var outcome = recoverFromFailedApply(before);
+      await reportUnopenableFile("فایل نامعتبر", "فایل «" + file.name + "» ساختار سالمی ندارد و باز نشد. " + outcome);
+      setStatus("فایل «" + file.name + "» باز نشد.");
       return false;
     }
     // A file opened from disk isn't yet one of the browser's saved entries —
@@ -3668,15 +3777,7 @@
         var confirmed = await confirmApp("پیش‌فاکتور جدید", "تغییرات ذخیره‌نشده از بین می‌رود. یک سند جدید ایجاد شود؟", "ایجاد سند جدید");
         if (!confirmed) return;
       }
-      applyInvoiceData(blankInvoice(), { manageDefaultRows: true });
-      currentSavedId = null;
-      currentSavedName = "";
-      currentSavedVersion = null;
-      isDirty = false;
-      numberIsAutoSuggested = true;
-      dateIsAutoSuggested = true;
-      stampRequested = true;
-      syncStampVisibility();
+      startBlankDocument();
       setStatus("سند جدید آماده است.");
       renderSavedList();
     });
@@ -3864,7 +3965,15 @@
     // Escape closes a <dialog> without going through closeAppDialog, so the
     // outstanding promise is settled here instead. In the normal path
     // closeAppDialog has already cleared it and this is a no-op.
+    //
+    // `close` is dispatched as a task, AFTER the microtasks that run once the
+    // closing dialog's promise resolves. A caller that answers one dialog by
+    // opening the next (confirm → "could not open" notice) has therefore
+    // already put a new question in #app-dialog by the time this arrives, and
+    // settling it here cancelled that question before the user ever saw it.
+    // A dialog that is open again is not the one this event is about.
     appDialogEl.addEventListener("close", function () {
+      if (appDialogEl.open) return;
       var resolve = activeDialogResolve;
       activeDialogResolve = null;
       if (resolve) resolve({ action: "cancel", value: "" });
@@ -4072,14 +4181,7 @@
     // Every load starts a clean blank invoice — nothing is auto-restored.
     // Previously-saved invoices stay reachable from the "ذخیره‌شده‌ها" panel
     // (see openSavedEntry above), they just aren't loaded automatically.
-    applyInvoiceData(blankInvoice(), { manageDefaultRows: true });
-    currentSavedId = null;
-    currentSavedName = "";
-    currentSavedVersion = null;
-    numberIsAutoSuggested = true;
-    dateIsAutoSuggested = true;
-    stampRequested = true;
-    syncStampVisibility();
+    startBlankDocument();
     setStatus("آماده برای ثبت پیش‌فاکتور جدید.");
     renderSavedList();
     isDirty = false;

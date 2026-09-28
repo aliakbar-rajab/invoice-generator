@@ -23,10 +23,20 @@
  *      at two densities rather than one layout with a hole in it.
  */
 
+/*
+ * The code renderInvoicePdf puts on the error it throws when a page still
+ * overflows after relief. Exported from here, next to the `overflowPages`
+ * result that triggers it, so the Worker can tell "this content cannot fit"
+ * apart from an ordinary render failure without importing pdf.js.
+ */
+export const PAGE_OVERFLOW_CODE = "INVOICE_PAGE_OVERFLOW";
+
 /**
  * @param {object} options
  * @param {number} options.maxRowsPerPage - hard per-sheet item cap (16)
- * @returns {{pages: number, densities: number[], typeScales: number[]}}
+ * @returns {{pages: number, densities: number[], typeScales: number[], overflowPages: number[]}}
+ *   overflowPages lists (1-based) every page whose content does not fit A4
+ *   even at the tightest rhythm — a page that would print clipped.
  */
 export function layoutInvoicePages(options) {
   const MAX_ROWS = (options && options.maxRowsPerPage) || 16;
@@ -240,11 +250,16 @@ export function layoutInvoicePages(options) {
   // two different tables.
   const densities = [];
   const typeScales = [];
-  finalPages.forEach(function (page) {
+  const overflowPages = [];
+  finalPages.forEach(function (page, index) {
     const solved = fitPage(page, rowsOf(page).length, finalPages.length === 1);
     densities.push(solved ? solved.density : 0);
     typeScales.push(solved ? solved.typeScale : TYPE_SCALE_MIN);
+    // Relief stops at one row per page, so a single row (or the closing
+    // block beside it) that is taller than A4 lands here. The app refuses to
+    // print such a document; the caller does the same with this list.
+    if (!solved) overflowPages.push(index + 1);
   });
 
-  return { pages: finalPages.length, densities, typeScales };
+  return { pages: finalPages.length, densities, typeScales, overflowPages };
 }
