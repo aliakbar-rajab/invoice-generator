@@ -1,11 +1,11 @@
 /*
  * Financial Computations for one Invoice Document.
  *
- * This is the only place the invoice's money is added up. Both View Adapters
- * call it: the browser DOM shell (js/app.js, recalcAll) and the Telegram bot
- * (worker/src/lib/invoiceTemplate.js, which gets a generated ESM copy of this
- * file — see worker/scripts/sync-assets.mjs). Before it existed the same two
- * formulas were written once on each side, with nothing keeping them equal.
+ * This is the only place the editor's money is added up (js/app.js,
+ * recalcAll). The Telegram bots are separate projects now
+ * (Desktop\invoice-telegram and Desktop\invoice-telegram-generic) with their
+ * own copy of this arithmetic, so a change to a formula here has to be made
+ * there too.
  *
  * Everything is BigInt, for the reason js/persian-numbers.js gives at length:
  * real Rial totals run past Number.MAX_SAFE_INTEGER, and a float would round
@@ -97,8 +97,7 @@ function taxBasisPointsFrom(taxPercent) {
     return BigInt(Math.max(0, Math.round(taxPercent * 100)));
   }
   if (taxPercent == null) return 0n;
-  // BigInt() choking on Persian digits is what used to throw RangeError here;
-  // see the regression test of the same name in worker/test.
+  // BigInt() choking on Persian digits is what used to throw RangeError here.
   var normalized = toAsciiDigits(String(taxPercent).trim()).replace(/٫/g, ".");
   // parseDecimalToBigIntScaled returns 0n for anything it cannot read, never
   // null, so the only check worth making is the sign one.
@@ -200,5 +199,5 @@ var InvoiceTotals = {
 // already; this is the namespaced handle for anything that prefers one.
 if (typeof window !== "undefined") window.InvoiceTotals = InvoiceTotals;
 
-// CommonJS load (worker/scripts/sync-assets.mjs reads the export list off this).
+// CommonJS load, for Node tooling that requires this file directly.
 if (typeof module !== "undefined" && module.exports) module.exports = InvoiceTotals;

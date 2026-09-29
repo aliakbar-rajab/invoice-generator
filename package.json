@@ -2,11 +2,10 @@
   "name": "offline-pishfaktor",
   "private": true,
   "scripts": {
-    "pretest": "node worker/scripts/sync-assets.mjs && npm run test:unit",
+    "pretest": "npm run test:unit",
     "test:unit": "node --test \"tests/unit/*.spec.mjs\"",
     "test": "playwright test",
     "test:app": "playwright test --project=app",
-    "test:layout": "playwright test --project=worker-layout",
     "test:regression": "playwright test --project=app tests/invoice-regressions.spec.mjs"
   },
   "devDependencies": {

@@ -40,7 +40,7 @@ The multi-page A4 document pagination and spacing engine.
 ### View Adapter (`آداپتور نمایشگر`)
 The presentation layer interfacing between the user and domain modules.
 - **Browser DOM Shell**: Standalone offline client (`app.js` and `persian-numbers.js`) orchestrating UI events, document persistence, arithmetic, and layout rhythm directly.
-- **Telegram Bot / Worker Adapter**: Cloudflare Worker runtime translating Telegram bot webhook messages and callback queries into invoice document builds and PDF renders.
+- **Telegram Bot / Worker Adapter**: Cloudflare Worker runtime translating Telegram bot webhook messages and callback queries into invoice document builds and PDF renders. Lives outside this repo: `Desktop\invoice-telegram` (@BonyanInvoiceBot, github.com/aliakbar-rajab/invoice-telegram) and `Desktop\invoice-telegram-generic` (@Invoice_generic_Bot, github.com/aliakbar-rajab/invoice-telegram-generic).
 
 ---
 

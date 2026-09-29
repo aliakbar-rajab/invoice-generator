@@ -1822,8 +1822,7 @@
 
   // Reads the Item Rows off the sheet, hands them to the Financial
   // Computations module, and paints what comes back. No arithmetic of its own:
-  // js/invoice-totals.js owns every figure below, and the bot's PDF is drawn
-  // from that same module (see worker/scripts/sync-assets.mjs).
+  // js/invoice-totals.js owns every figure below.
   function recalcAll(opts) {
     var rows = rowsBody.querySelectorAll("tr");
     calculationErrors = [];

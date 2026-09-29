@@ -28,14 +28,5 @@ export default defineConfig({
   },
   projects: [
     { name: "app", testDir: "./tests" },
-    // Layout regression checks for the bot's PDF path: they render
-    // buildInvoiceHtml() output in a real browser to measure computed
-    // geometry, which workerd (the vitest pool) has no layout engine for.
-    // Kept here rather than in a second Playwright install under worker/.
-    {
-      name: "worker-layout",
-      testDir: "./worker/test-visual",
-      use: { channel: undefined, locale: undefined, timezoneId: undefined },
-    },
   ],
 });
